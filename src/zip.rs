@@ -1,4 +1,4 @@
-use crate::center_directory::CentralDirectory;
+use crate::directory::Directory;
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use crate::stream::stream::Stream;
@@ -8,7 +8,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 pub struct Zip<T> {
     stream: Stream<T>,
     eo_cd: Option<EoCd>,
-    directories: Vec<CentralDirectory>,
+    directories: Vec<Directory>,
 }
 impl<T: Read + Write + Seek> Zip<T> {
     pub fn new(stream: Stream<T>) -> Self {
@@ -23,7 +23,7 @@ impl<T: Read + Write + Seek> Zip<T> {
         self.stream.seek(SeekFrom::Start(eo_cd.offset as u64))?;
         let mut directories = vec![];
         for _ in 0..eo_cd.entries {
-            let dir: CentralDirectory = self.stream.read_value()?;
+            let dir: Directory = self.stream.read_value()?;
             directories.push(dir);
         }
         self.directories = directories;

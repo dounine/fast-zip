@@ -10,7 +10,7 @@ mod eocd;
 mod error;
 mod stream;
 mod zip;
-mod center_directory;
+mod directory;
 
 #[repr(u32)]
 #[derive(Debug, NumToEnum)]

@@ -4,7 +4,7 @@ use crate::stream::stream::Stream;
 use std::io::{Error, ErrorKind, Read, Seek, Write};
 
 #[derive(Debug)]
-pub struct CentralDirectory {
+pub struct Directory {
     version: u16,
     min_version: u16,
     bit_flag: u16,
@@ -25,12 +25,12 @@ pub struct CentralDirectory {
     extra_field: Vec<u8>,
     file_comment: Vec<u8>,
 }
-impl<T: Read + Write + Seek> ValueRead<T> for CentralDirectory {
-    fn read(stream: &mut Stream<T>, endian: &Endian) -> std::io::Result<Self> {
+impl<T: Read + Write + Seek> ValueRead<T> for Directory {
+    fn read(stream: &mut Stream<T>, _endian: &Endian) -> std::io::Result<Self> {
         let magic: u32 = stream.read_value()?;
         if magic != 0x02014b50 {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
+            return Err(Error::new(
+                ErrorKind::InvalidData,
                 "Invalid directory magic number",
             ));
         }
