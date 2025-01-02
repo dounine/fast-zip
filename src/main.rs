@@ -1,9 +1,16 @@
 // use crate::stream::stream::Stream;
 use derive::NumToEnum;
 // use std::io::{Read, Seek, SeekFrom};
-use std::io;
+use crate::error::ZipError;
+use crate::stream::stream::Stream;
+use crate::zip::Zip;
+use std::{fs, io};
 
+mod eocd;
+mod error;
 mod stream;
+mod zip;
+mod center_directory;
 
 #[repr(u32)]
 #[derive(Debug, NumToEnum)]
@@ -13,12 +20,16 @@ pub enum Cpu {
     Hello = 3 | 4,
     Unknown(u32),
 }
-fn main() -> io::Result<()> {
-    // let v: u32 = Cpu::Arm.into();
-    let cpu: Cpu = (3|4).into();
+
+fn main() -> Result<(), ZipError> {
+    let v: u32 = Cpu::Arm.into();
+    let cpu: Cpu = (3 | 4).into();
     println!("{:?}", cpu);
-    // let zip_file = fs::File::open("./data/app.ipa")?;
-    // let mut stream = Stream::new(zip_file);
+    let zip_file = fs::File::open("./data/app.ipa")?;
+    let stream = Stream::new(zip_file);
+    let mut zip = Zip::new(stream);
+    zip.init()?;
+
     // let value: u8 = stream.read_value()?;
     // let value = stream.seek(SeekFrom::End(-22))?;
     // println!("position {}", value);

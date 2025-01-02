@@ -2,6 +2,18 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, Data, DeriveInput, ExprLit, Fields, Meta, Type};
 
+
+///
+/// #[repr(u32)]
+/// #[derive(Debug, NumToEnum)]
+/// pub enum Cpu {
+///     X84 = 1,
+///     Arm = 2,
+///     Hello = 3 | 4,
+///     Unknown(u32),
+/// }
+///  let v: u32 = Cpu::Arm.into();
+///  let cpu: Cpu = (3|4).into();
 #[proc_macro_derive(NumToEnum)]
 pub fn num_to_enum(input: TokenStream) -> TokenStream {
     let ast = parse_macro_input!(input as DeriveInput);
