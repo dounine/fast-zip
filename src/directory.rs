@@ -1,7 +1,23 @@
-use crate::stream::endian::Endian;
 use crate::stream::bytes::ValueRead;
+use crate::stream::endian::Endian;
 use crate::stream::stream::Stream;
 use std::io::{Error, ErrorKind, Read, Seek, Write};
+
+#[derive(Debug, Default)]
+pub struct ZipFile {
+    min_version: u16,
+    bit_flag: u16,
+    compression_method: u16,
+    last_modification_time: u16,
+    last_modification_date: u16,
+    crc_32_uncompressed_data: u32,
+    compressed_size: u32,
+    uncompressed_size: u32,
+    file_name_length: u16,
+    extra_field_length: u16,
+    file_name: String,
+    extra_field: Vec<u8>,
+}
 
 #[derive(Debug)]
 pub struct Directory {
@@ -24,6 +40,7 @@ pub struct Directory {
     file_name: String,
     extra_field: Vec<u8>,
     file_comment: Vec<u8>,
+    file: ZipFile,
 }
 impl<T: Read + Write + Seek> ValueRead<T> for Directory {
     fn read(stream: &mut Stream<T>, _endian: &Endian) -> std::io::Result<Self> {
@@ -34,6 +51,7 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
                 "Invalid directory magic number",
             ));
         }
+        let mut file = ZipFile::default();
         let mut info = Self {
             version: stream.read_value()?,
             min_version: stream.read_value()?,
@@ -54,6 +72,7 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
             file_name: "".to_string(),
             extra_field: vec![],
             file_comment: vec![],
+            file,
         };
         let file_name = stream.read_size(info.file_name_length as u64)?;
         let file_name =
