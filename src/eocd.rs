@@ -1,5 +1,5 @@
 use crate::stream::endian::Endian;
-use crate::stream::read_write::ValueRead;
+use crate::stream::bytes::ValueRead;
 use crate::stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};
 
