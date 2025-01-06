@@ -40,7 +40,7 @@ impl EoCd {
                 if magic == eocd_magic {
                     return Ok(search_size - i);
                 }
-                if search_size == 22 {
+                if search_size <= 22 {
                     break;
                 }
             }
