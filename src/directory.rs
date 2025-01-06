@@ -1,7 +1,9 @@
 use crate::stream::bytes::ValueRead;
-use crate::stream::endian::Endian;
+use crate::stream::pin::Pin;
 use crate::stream::stream::Stream;
-use std::io::{Error, ErrorKind, Read, Seek, Write};
+use miniz_oxide::deflate::compress_to_vec_zlib;
+use miniz_oxide::inflate::decompress_to_vec;
+use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug, Default)]
 pub struct ZipFile {
@@ -17,6 +19,57 @@ pub struct ZipFile {
     extra_field_length: u16,
     file_name: String,
     extra_field: Vec<u8>,
+}
+impl ZipFile {
+    pub fn un_compressed_data<T: Read + Write + Seek>(
+        &self,
+        stream: &mut Stream<T>,
+    ) -> std::io::Result<Vec<u8>> {
+        stream.pin()?;
+        let compressed_data = stream.read_size(self.compressed_size as u64)?;
+        let data = if self.uncompressed_size != self.compressed_size {
+            let uncompress_data = decompress_to_vec(&compressed_data)
+                .map_err(|e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
+            uncompress_data
+        } else {
+            compressed_data
+        };
+        stream.un_pin()?;
+        Ok(data)
+    }
+}
+
+impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
+    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
+        let magic: u32 = stream.read_value()?;
+        if magic != 0x04034b50 {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                "Invalid directory file magic number",
+            ));
+        }
+        let mut file = ZipFile {
+            min_version: stream.read_value()?,
+            bit_flag: stream.read_value()?,
+            compression_method: stream.read_value()?,
+            last_modification_time: stream.read_value()?,
+            last_modification_date: stream.read_value()?,
+            crc_32_uncompressed_data: stream.read_value()?,
+            compressed_size: stream.read_value()?,
+            uncompressed_size: stream.read_value()?,
+            file_name_length: stream.read_value()?,
+            extra_field_length: stream.read_value()?,
+            file_name: "".to_string(),
+            extra_field: vec![],
+        };
+        let file_name = stream.read_size(file.file_name_length as u64)?;
+        let file_name =
+            String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
+        file.file_name = file_name.clone();
+        file.extra_field = stream.read_size(file.extra_field_length as u64)?;
+        // let data = file.un_compressed_data(stream)?;
+        Ok(file)
+    }
 }
 
 #[derive(Debug)]
@@ -43,7 +96,7 @@ pub struct Directory {
     file: ZipFile,
 }
 impl<T: Read + Write + Seek> ValueRead<T> for Directory {
-    fn read(stream: &mut Stream<T>, _endian: &Endian) -> std::io::Result<Self> {
+    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
         let magic: u32 = stream.read_value()?;
         if magic != 0x02014b50 {
             return Err(Error::new(
@@ -80,6 +133,11 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
         info.file_name = file_name;
         info.extra_field = stream.read_size(info.extra_field_length as u64)?;
         info.file_comment = stream.read_size(info.file_comment_length as u64)?;
+        stream.pin()?;
+        stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
+        let file: ZipFile = stream.read_value()?;
+        dbg!(file);
+        stream.un_pin()?;
         Ok(info)
     }
 }

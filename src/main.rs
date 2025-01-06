@@ -22,14 +22,10 @@ pub enum Cpu {
 }
 
 fn main() -> Result<(), ZipError> {
-    let v: u32 = Cpu::Arm.into();
-    let cpu: Cpu = (3 | 4).into();
-    println!("{:?}", cpu);
-    let zip_file = fs::File::open("./data/app.ipa")?;
+    let zip_file = fs::File::open("./data/hello.zip")?;
     let stream = Stream::new(zip_file);
     let mut zip = Zip::new(stream);
     zip.init()?;
-
     // let value: u8 = stream.read_value()?;
     // let value = stream.seek(SeekFrom::End(-22))?;
     // println!("position {}", value);

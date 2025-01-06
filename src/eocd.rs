@@ -15,7 +15,7 @@ pub struct EoCd {
 }
 
 impl<T: Read + Write + Seek> ValueRead<T> for EoCd {
-    fn read(stream: &mut Stream<T>, _endian: &Endian) -> std::io::Result<Self> {
+    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
         stream.seek(SeekFrom::End(-22))?;
         let magic: [u8; 4] = stream.read_value()?;
         if &magic != b"PK\x05\x06" {
