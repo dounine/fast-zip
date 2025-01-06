@@ -11,6 +11,7 @@ mod error;
 mod stream;
 mod zip;
 mod directory;
+mod magic;
 
 #[repr(u32)]
 #[derive(Debug, NumToEnum)]

@@ -1,15 +1,41 @@
+use crate::magic::Magic;
 use crate::stream::bytes::ValueRead;
 use crate::stream::pin::Pin;
 use crate::stream::stream::Stream;
+use derive::NumToEnum;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec;
 use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
+
+#[repr(u16)]
+#[derive(Debug, Default, NumToEnum)]
+pub enum CompressionType {
+    #[default]
+    Store = 0x0000,
+    Shrink = 0x0001,
+    Implode = 0x0006,
+    Deflate = 0x0008,
+    Deflate64 = 0x0009,
+    BZIP2 = 0x000C,
+    LZMA = 0x000E,
+    XZ = 0x005F,
+    JPEG = 0x0060,
+    WavPack = 0x0061,
+    PPMd = 0x0062,
+    AES = 0x0063,
+}
+impl<T: Read + Write + Seek> ValueRead<T> for CompressionType {
+    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
+        let value: u16 = stream.read_value()?;
+        Ok(value.into())
+    }
+}
 
 #[derive(Debug, Default)]
 pub struct ZipFile {
     min_version: u16,
     bit_flag: u16,
-    compression_method: u16,
+    compression_method: CompressionType,
     last_modification_time: u16,
     last_modification_date: u16,
     crc_32_uncompressed_data: u32,
@@ -41,8 +67,8 @@ impl ZipFile {
 
 impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
     fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
-        let magic: u32 = stream.read_value()?;
-        if magic != 0x04034b50 {
+        let magic: Magic = stream.read_value()?;
+        if magic != Magic::File {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "Invalid directory file magic number",
@@ -97,8 +123,8 @@ pub struct Directory {
 }
 impl<T: Read + Write + Seek> ValueRead<T> for Directory {
     fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
-        let magic: u32 = stream.read_value()?;
-        if magic != 0x02014b50 {
+        let magic: Magic = stream.read_value()?;
+        if magic != Magic::Directory {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "Invalid directory magic number",

@@ -2,6 +2,7 @@ use crate::stream::endian::Endian;
 use crate::stream::bytes::ValueRead;
 use crate::stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};
+use crate::magic::Magic;
 
 #[derive(Debug)]
 pub struct EoCd {
@@ -17,8 +18,9 @@ pub struct EoCd {
 impl<T: Read + Write + Seek> ValueRead<T> for EoCd {
     fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
         stream.seek(SeekFrom::End(-22))?;
-        let magic: [u8; 4] = stream.read_value()?;
-        if &magic != b"PK\x05\x06" {
+
+        let magic: Magic = stream.read_value()?;
+        if magic != Magic::EoCd {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "not a zip file",
