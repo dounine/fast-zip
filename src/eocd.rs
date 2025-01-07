@@ -1,9 +1,9 @@
 use crate::magic::Magic;
-use crate::stream::bytes::ValueRead;
-use crate::stream::len::Len;
-use crate::stream::pin::Pin;
-use crate::stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};
+use fast_stream::bytes::ValueRead;
+use fast_stream::pin::Pin;
+use fast_stream::len::Len;
+use fast_stream::stream::Stream;
 
 #[derive(Debug)]
 pub struct EoCd {

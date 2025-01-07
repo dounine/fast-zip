@@ -1,8 +1,8 @@
 use crate::directory::Directory;
 use crate::eocd::EoCd;
 use crate::error::ZipError;
-use crate::stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};
+use fast_stream::stream::Stream;
 
 #[derive(Debug)]
 pub struct Zip<T> {

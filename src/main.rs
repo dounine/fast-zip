@@ -2,13 +2,12 @@
 use derive::NumToEnum;
 // use std::io::{Read, Seek, SeekFrom};
 use crate::error::ZipError;
-use crate::stream::stream::Stream;
 use crate::zip::Zip;
 use std::{fs, io};
+use fast_stream::stream::Stream;
 
 mod eocd;
 mod error;
-mod stream;
 mod zip;
 mod directory;
 mod magic;

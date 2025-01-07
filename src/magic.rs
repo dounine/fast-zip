@@ -1,7 +1,7 @@
-use crate::stream::bytes::ValueRead;
-use crate::stream::stream::Stream;
 use derive::NumToEnum;
 use std::io::{Read, Seek, Write};
+use fast_stream::bytes::ValueRead;
+use fast_stream::stream::Stream;
 
 #[repr(u32)]
 #[derive(Debug, PartialEq, NumToEnum)]

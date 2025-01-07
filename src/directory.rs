@@ -1,11 +1,11 @@
 use crate::magic::Magic;
-use crate::stream::bytes::ValueRead;
-use crate::stream::pin::Pin;
-use crate::stream::stream::Stream;
 use derive::NumToEnum;
 use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec;
 use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
+use fast_stream::bytes::ValueRead;
+use fast_stream::pin::Pin;
+use fast_stream::stream::Stream;
 
 #[repr(u16)]
 #[derive(Debug, Default, NumToEnum)]

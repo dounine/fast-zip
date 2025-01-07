@@ -6,4 +6,5 @@ edition = "2021"
 [dependencies]
 thiserror = "2.0"
 miniz_oxide = "0.8.2"
+fast_stream = {path = "/Users/lake/dounine/github/ipa/fast-stream"}
 derive = { path = "./derive" }
