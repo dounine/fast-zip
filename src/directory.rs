@@ -1,11 +1,12 @@
 use crate::magic::Magic;
 use derive::NumToEnum;
-use miniz_oxide::deflate::compress_to_vec_zlib;
-use miniz_oxide::inflate::decompress_to_vec;
-use std::io::{Error, ErrorKind, Read, Seek, SeekFrom, Write};
-use fast_stream::bytes::ValueRead;
+use fast_stream::bytes::{ValueRead, ValueWrite};
+use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
+use miniz_oxide::deflate::compress_to_vec_zlib;
+use miniz_oxide::inflate::decompress_to_vec;
+use std::io::{Cursor, Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
 #[repr(u16)]
 #[derive(Debug, Default, NumToEnum)]
@@ -120,6 +121,32 @@ pub struct Directory {
     extra_field: Vec<u8>,
     file_comment: Vec<u8>,
     file: ZipFile,
+}
+impl ValueWrite for Directory {
+    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+        let mut stream: Stream<Cursor<Vec<u8>>> = Stream::empty();
+        stream.with_endian(endian.clone());
+        stream.write_value(&Magic::Directory)?;
+        stream.write_value(&self.version)?;
+        stream.write_value(&self.min_version)?;
+        stream.write_value(&self.bit_flag)?;
+        stream.write_value(&self.compression_method)?;
+        stream.write_value(&self.last_modification_time)?;
+        stream.write_value(&self.last_modification_date)?;
+        stream.write_value(&self.compressed_size)?;
+        stream.write_value(&self.uncompressed_size)?;
+        stream.write_value(&self.file_name_length)?;
+        stream.write_value(&self.extra_field_length)?;
+        stream.write_value(&self.file_comment_length)?;
+        stream.write_value(&self.number_of_starts)?;
+        stream.write_value(&self.internal_file_attributes)?;
+        stream.write_value(&self.external_file_attributes)?;
+        stream.write_value(&self.offset_of_local_file_header)?;
+        stream.write_value(&self.file_name)?;
+        stream.write_value(&self.extra_field)?;
+        stream.write_value(&self.file_comment)?;
+        Ok(std::mem::take(stream.inner.get_mut()))
+    }
 }
 impl<T: Read + Write + Seek> ValueRead<T> for Directory {
     fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {

@@ -1,8 +1,10 @@
 use crate::directory::Directory;
 use crate::eocd::EoCd;
 use crate::error::ZipError;
-use std::io::{Read, Seek, SeekFrom, Write};
+use fast_stream::bytes::ValueWrite;
+use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
+use std::io::{Read, Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub struct Zip<T> {
@@ -18,7 +20,7 @@ impl<T: Read + Write + Seek> Zip<T> {
             directories: vec![],
         }
     }
-    pub fn init(&mut self) -> Result<(), ZipError> {
+    pub fn parse(&mut self) -> Result<(), ZipError> {
         let eo_cd = self.stream.read_value::<EoCd>()?;
         self.stream.seek(SeekFrom::Start(eo_cd.offset as u64))?;
         let mut directories = vec![];
@@ -29,6 +31,13 @@ impl<T: Read + Write + Seek> Zip<T> {
         self.directories = directories;
         self.eo_cd = Some(eo_cd);
 
+        Ok(())
+    }
+    pub fn write<O: Read + Write + Seek>(&mut self, output: &mut O) -> Result<(), ZipError> {
+        let endian = Endian::Little;
+        for director in &mut self.directories {
+            output.write(&director.write(&endian)?)?;
+        }
         Ok(())
     }
 }
