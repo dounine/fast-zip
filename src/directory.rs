@@ -31,21 +31,45 @@ impl<T: Read + Write + Seek> ValueRead<T> for CompressionType {
         Ok(value.into())
     }
 }
-
+const ZIP_FILE_HEADER_SIZE: usize = size_of::<Magic>()
+    + size_of::<u16>() * 2
+    + size_of::<CompressionType>()
+    + size_of::<u16>() * 2
+    + size_of::<u32>() * 3
+    + size_of::<u16>() * 2;
 #[derive(Debug, Default)]
 pub struct ZipFile {
-    min_version: u16,
-    bit_flag: u16,
-    compression_method: CompressionType,
-    last_modification_time: u16,
-    last_modification_date: u16,
-    crc_32_uncompressed_data: u32,
-    compressed_size: u32,
-    uncompressed_size: u32,
-    file_name_length: u16,
-    extra_field_length: u16,
-    file_name: String,
-    extra_field: Vec<u8>,
+    pub min_version: u16,
+    pub bit_flag: u16,
+    pub compression_method: CompressionType,
+    pub last_modification_time: u16,
+    pub last_modification_date: u16,
+    pub crc_32_uncompressed_data: u32,
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub file_name_length: u16,
+    pub extra_field_length: u16,
+    pub file_name: String,
+    pub extra_field: Vec<u8>,
+}
+impl ZipFile {
+    pub fn size(&self) -> usize {
+        // size_of::<Magic>()
+        //     + size_of_val(&self.min_version)
+        //     + size_of_val(&self.bit_flag)
+        //     + size_of_val(&self.compression_method)
+        //     + size_of_val(&self.last_modification_time)
+        //     + size_of_val(&self.last_modification_date)
+        //     + size_of_val(&self.crc_32_uncompressed_data)
+        //     + size_of_val(&self.compressed_size)
+        //     + size_of_val(&self.uncompressed_size)
+        //     + size_of_val(&self.file_name_length)
+        //     + size_of_val(&self.extra_field_length)
+        ZIP_FILE_HEADER_SIZE
+            + self.file_name.as_bytes().len()
+            + self.extra_field.len()
+            + self.compressed_size as usize
+    }
 }
 impl ZipFile {
     pub fn un_compressed_data<T: Read + Write + Seek>(
@@ -98,29 +122,41 @@ impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
         Ok(file)
     }
 }
-
+const DIRECTORY_HEADER_SIZE: usize = size_of::<Magic>()
+    + size_of::<u16>() * 6
+    + size_of::<u32>() * 3
+    + size_of::<u16>() * 5
+    + size_of::<u32>() * 2;
 #[derive(Debug)]
 pub struct Directory {
-    version: u16,
-    min_version: u16,
-    bit_flag: u16,
-    compression_method: u16,
-    last_modification_time: u16,
-    last_modification_date: u16,
-    crc_32_uncompressed_data: u32,
-    compressed_size: u32,
-    uncompressed_size: u32,
-    file_name_length: u16,
-    extra_field_length: u16,
-    file_comment_length: u16,
-    number_of_starts: u16,
-    internal_file_attributes: u16,
-    external_file_attributes: u32,
-    offset_of_local_file_header: u32,
-    file_name: String,
-    extra_field: Vec<u8>,
-    file_comment: Vec<u8>,
-    file: ZipFile,
+    pub version: u16,
+    pub min_version: u16,
+    pub bit_flag: u16,
+    pub compression_method: u16,
+    pub last_modification_time: u16,
+    pub last_modification_date: u16,
+    pub crc_32_uncompressed_data: u32,
+    pub compressed_size: u32,
+    pub uncompressed_size: u32,
+    pub file_name_length: u16,
+    pub extra_field_length: u16,
+    pub file_comment_length: u16,
+    pub number_of_starts: u16,
+    pub internal_file_attributes: u16,
+    pub external_file_attributes: u32,
+    pub offset_of_local_file_header: u32,
+    pub file_name: String,
+    pub extra_field: Vec<u8>,
+    pub file_comment: Vec<u8>,
+    pub file: ZipFile,
+}
+impl Directory {
+    pub fn size(&self) -> usize {
+        DIRECTORY_HEADER_SIZE
+            + self.file_name.as_bytes().len()
+            + self.extra_field.len()
+            + self.file_comment.len()
+    }
 }
 impl ValueWrite for Directory {
     fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
@@ -189,8 +225,8 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
         stream.pin()?;
         stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
         let file: ZipFile = stream.read_value()?;
-        dbg!(file);
         stream.un_pin()?;
+        info.file = file;
         Ok(info)
     }
 }

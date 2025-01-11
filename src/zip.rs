@@ -9,8 +9,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 #[derive(Debug)]
 pub struct Zip<T> {
     stream: Stream<T>,
-    eo_cd: Option<EoCd>,
-    directories: Vec<Directory>,
+    pub eo_cd: Option<EoCd>,
+    pub directories: Vec<Directory>,
 }
 impl<T: Read + Write + Seek> Zip<T> {
     pub fn new(stream: Stream<T>) -> Self {
@@ -33,13 +33,31 @@ impl<T: Read + Write + Seek> Zip<T> {
 
         Ok(())
     }
+    fn computer(&mut self) -> Result<(), ZipError> {
+        let mut files_size = 0;
+        let mut directors_size = 0;
+        for director in &self.directories {
+            files_size += director.file.size();
+            directors_size += director.size();
+            dbg!(director.file.size());
+            dbg!(director.size());
+        }
+        if let Some(eocd) = &mut self.eo_cd{
+            eocd.size = directors_size as u32;
+            eocd.entries = self.directories.len() as u16;
+            eocd.offset = files_size as u32;
+        }
+
+        Ok(())
+    }
     pub fn write<O: Read + Write + Seek>(&mut self, output: &mut O) -> Result<(), ZipError> {
         let endian = Endian::Little;
-        if let Some(eo_cd) = &self.eo_cd {
-            output.write(&eo_cd.write(&endian)?)?;
-        }
+        self.computer()?;
         for director in &mut self.directories {
             output.write(&director.write(&endian)?)?;
+        }
+        if let Some(eo_cd) = &self.eo_cd {
+            output.write(&eo_cd.write(&endian)?)?;
         }
         Ok(())
     }
