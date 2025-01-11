@@ -1,9 +1,10 @@
 use crate::magic::Magic;
-use std::io::{Read, Seek, SeekFrom, Write};
-use fast_stream::bytes::ValueRead;
-use fast_stream::pin::Pin;
+use fast_stream::bytes::{ValueRead, ValueWrite};
+use fast_stream::endian::Endian;
 use fast_stream::len::Len;
+use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub struct EoCd {
@@ -14,6 +15,21 @@ pub struct EoCd {
     pub size: u32,
     pub offset: u32,
     pub comment_length: u16,
+}
+impl ValueWrite for EoCd {
+    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+        let mut output: Stream<Cursor<Vec<u8>>> = Stream::empty();
+        output.with_endian(endian.clone());
+        output.write_value(&Magic::EoCd)?;
+        output.write_value(&self.number_of_disk)?;
+        output.write_value(&self.directory_starts)?;
+        output.write_value(&self.number_of_directory_disk)?;
+        output.write_value(&self.entries)?;
+        output.write_value(&self.size)?;
+        output.write_value(&self.offset)?;
+        output.write_value(&self.comment_length)?;
+        Ok(std::mem::take(output.inner.get_mut()))
+    }
 }
 impl EoCd {
     pub fn find_offset<T: Read + Write + Seek>(stream: &mut Stream<T>) -> std::io::Result<u64> {

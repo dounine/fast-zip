@@ -35,6 +35,9 @@ impl<T: Read + Write + Seek> Zip<T> {
     }
     pub fn write<O: Read + Write + Seek>(&mut self, output: &mut O) -> Result<(), ZipError> {
         let endian = Endian::Little;
+        if let Some(eo_cd) = &self.eo_cd {
+            output.write(&eo_cd.write(&endian)?)?;
+        }
         for director in &mut self.directories {
             output.write(&director.write(&endian)?)?;
         }
