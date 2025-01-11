@@ -18,7 +18,7 @@ pub struct EoCd {
 }
 impl ValueWrite for EoCd {
     fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
-        let mut output: Stream<Cursor<Vec<u8>>> = Stream::empty();
+        let mut output = Stream::empty();
         output.with_endian(endian.clone());
         output.write_value(&Magic::EoCd)?;
         output.write_value(&self.number_of_disk)?;
@@ -28,7 +28,7 @@ impl ValueWrite for EoCd {
         output.write_value(&self.size)?;
         output.write_value(&self.offset)?;
         output.write_value(&self.comment_length)?;
-        Ok(std::mem::take(output.inner.get_mut()))
+        Ok(output.take_data())
     }
 }
 impl EoCd {

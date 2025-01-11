@@ -124,7 +124,7 @@ pub struct Directory {
 }
 impl ValueWrite for Directory {
     fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
-        let mut stream: Stream<Cursor<Vec<u8>>> = Stream::empty();
+        let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(&Magic::Directory)?;
         stream.write_value(&self.version)?;
@@ -145,7 +145,7 @@ impl ValueWrite for Directory {
         stream.write_value(&self.file_name)?;
         stream.write_value(&self.extra_field)?;
         stream.write_value(&self.file_comment)?;
-        Ok(std::mem::take(stream.inner.get_mut()))
+        Ok(stream.take_data())
     }
 }
 impl<T: Read + Write + Seek> ValueRead<T> for Directory {
