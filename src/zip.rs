@@ -36,11 +36,10 @@ impl<T: Read + Write + Seek> Zip<T> {
     fn computer(&mut self) -> Result<(), ZipError> {
         let mut files_size = 0;
         let mut directors_size = 0;
-        for director in &self.directories {
+        for director in &mut self.directories {
+            director.offset_of_local_file_header = files_size as u32;
             files_size += director.file.size();
             directors_size += director.size();
-            dbg!(director.file.size());
-            dbg!(director.size());
         }
         if let Some(eocd) = &mut self.eo_cd{
             eocd.size = directors_size as u32;
