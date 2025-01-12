@@ -41,7 +41,7 @@ impl<T: Read + Write + Seek> Zip<T> {
             files_size += director.file.size();
             directors_size += director.size();
         }
-        if let Some(eocd) = &mut self.eo_cd{
+        if let Some(eocd) = &mut self.eo_cd {
             eocd.size = directors_size as u32;
             eocd.entries = self.directories.len() as u16;
             eocd.offset = files_size as u32;
@@ -52,6 +52,11 @@ impl<T: Read + Write + Seek> Zip<T> {
     pub fn write<O: Read + Write + Seek>(&mut self, output: &mut O) -> Result<(), ZipError> {
         let endian = Endian::Little;
         self.computer()?;
+        for director in &mut self.directories {
+            let data = std::mem::take(&mut director.file.extra_field);
+            output.write(&director.file.write(&endian)?)?;
+            output.write(&data)?;
+        }
         for director in &mut self.directories {
             output.write(&director.write(&endian)?)?;
         }

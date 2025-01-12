@@ -14,9 +14,3 @@ pub enum Magic {
     File = 0x04034b50,
 }
 enum_to_bytes!(Magic, u32);
-impl<T: Read + Write + Seek> ValueRead<T> for Magic {
-    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
-        let value: u32 = stream.read_value()?;
-        Ok(value.into())
-    }
-}

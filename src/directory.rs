@@ -2,6 +2,7 @@ use crate::magic::Magic;
 use derive::NumToEnum;
 use fast_stream::bytes::{ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
+use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use miniz_oxide::deflate::compress_to_vec_zlib;
@@ -9,7 +10,7 @@ use miniz_oxide::inflate::decompress_to_vec;
 use std::io::{Cursor, Error, ErrorKind, Read, Seek, SeekFrom, Write};
 
 #[repr(u16)]
-#[derive(Debug, Default, NumToEnum)]
+#[derive(Debug, Clone, Default, NumToEnum)]
 pub enum CompressionType {
     #[default]
     Store = 0x0000,
@@ -25,12 +26,7 @@ pub enum CompressionType {
     PPMd = 0x0062,
     AES = 0x0063,
 }
-impl<T: Read + Write + Seek> ValueRead<T> for CompressionType {
-    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
-        let value: u16 = stream.read_value()?;
-        Ok(value.into())
-    }
-}
+enum_to_bytes!(CompressionType, u16);
 const ZIP_FILE_HEADER_SIZE: usize = size_of::<Magic>()
     + size_of::<u16>() * 2
     + size_of::<CompressionType>()
@@ -51,6 +47,26 @@ pub struct ZipFile {
     pub extra_field_length: u16,
     pub file_name: String,
     pub extra_field: Vec<u8>,
+}
+impl ValueWrite for ZipFile {
+    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+        let mut stream = Stream::empty();
+        stream.with_endian(endian.clone());
+        stream.write_value(&Magic::File)?;
+        stream.write_value(&self.min_version)?;
+        stream.write_value(&self.bit_flag)?;
+        stream.write_value(&self.compression_method)?;
+        stream.write_value(&self.last_modification_time)?;
+        stream.write_value(&self.last_modification_date)?;
+        stream.write_value(&self.crc_32_uncompressed_data)?;
+        stream.write_value(&self.compressed_size)?;
+        stream.write_value(&self.uncompressed_size)?;
+        stream.write_value(&self.file_name_length)?;
+        stream.write_value(&self.extra_field_length)?;
+        stream.write_value(&self.file_name)?;
+        stream.write_value(&self.extra_field)?;
+        Ok(stream.take_data())
+    }
 }
 impl ZipFile {
     pub fn size(&self) -> usize {
