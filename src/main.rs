@@ -33,7 +33,8 @@ fn main() -> Result<(), ZipError> {
     let mut output = Cursor::new(&mut data);
     zip.write(&mut output)?;
 
-    println!("{:?}", data);
+    // println!("{:?}", data);
+    fs::write("./data/copy.zip", &mut data)?;
 
     // let value: u8 = stream.read_value()?;
     // let value = stream.seek(SeekFrom::End(-22))?;

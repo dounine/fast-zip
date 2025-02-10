@@ -53,9 +53,11 @@ impl<T: Read + Write + Seek> Zip<T> {
         let endian = Endian::Little;
         self.computer()?;
         for director in &mut self.directories {
-            let data = std::mem::take(&mut director.file.extra_field);
+            let extra_field = std::mem::take(&mut director.file.extra_field);
             output.write(&director.file.write(&endian)?)?;
-            output.write(&data)?;
+            output.write(&extra_field)?;
+            let mut data = director.file.origin_data(&mut self.stream)?;
+            output.write(&mut data)?;
         }
         for director in &mut self.directories {
             output.write(&director.write(&endian)?)?;

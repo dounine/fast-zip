@@ -47,6 +47,7 @@ pub struct ZipFile {
     pub extra_field_length: u16,
     pub file_name: String,
     pub extra_field: Vec<u8>,
+    pub data_position: u64,
 }
 impl ValueWrite for ZipFile {
     fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
@@ -64,7 +65,7 @@ impl ValueWrite for ZipFile {
         stream.write_value(&self.file_name_length)?;
         stream.write_value(&self.extra_field_length)?;
         stream.write_value(&self.file_name)?;
-        stream.write_value(&self.extra_field)?;
+        // stream.write_value(&self.extra_field)?;
         Ok(stream.take_data())
     }
 }
@@ -88,6 +89,16 @@ impl ZipFile {
     }
 }
 impl ZipFile {
+    pub fn origin_data<T: Read + Write + Seek>(
+        &self,
+        stream: &mut Stream<T>,
+    ) -> std::io::Result<Vec<u8>> {
+        stream.pin()?;
+        stream.seek(SeekFrom::Start(self.data_position))?;
+        let data = stream.read_size(self.compressed_size as u64)?;
+        stream.un_pin()?;
+        Ok(data)
+    }
     pub fn un_compressed_data<T: Read + Write + Seek>(
         &self,
         stream: &mut Stream<T>,
@@ -128,12 +139,14 @@ impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
             extra_field_length: stream.read_value()?,
             file_name: "".to_string(),
             extra_field: vec![],
+            data_position: 0,
         };
         let file_name = stream.read_size(file.file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
         file.file_name = file_name.clone();
         file.extra_field = stream.read_size(file.extra_field_length as u64)?;
+        file.data_position = stream.stream_position()?;
         // let data = file.un_compressed_data(stream)?;
         Ok(file)
     }
@@ -185,6 +198,7 @@ impl ValueWrite for Directory {
         stream.write_value(&self.compression_method)?;
         stream.write_value(&self.last_modification_time)?;
         stream.write_value(&self.last_modification_date)?;
+        stream.write_value(&self.crc_32_uncompressed_data)?;
         stream.write_value(&self.compressed_size)?;
         stream.write_value(&self.uncompressed_size)?;
         stream.write_value(&self.file_name_length)?;
