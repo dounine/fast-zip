@@ -1,5 +1,5 @@
 use crate::magic::Magic;
-use fast_stream::bytes::{ValueRead, ValueWrite};
+use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::len::Len;
 use fast_stream::pin::Pin;

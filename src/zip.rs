@@ -1,7 +1,7 @@
 use crate::directory::Directory;
 use crate::eocd::EoCd;
 use crate::error::ZipError;
-use fast_stream::bytes::ValueWrite;
+use fast_stream::bytes::{Bytes, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};

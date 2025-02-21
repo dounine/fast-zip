@@ -1,6 +1,6 @@
 use crate::magic::Magic;
 use derive::NumToEnum;
-use fast_stream::bytes::{ValueRead, ValueWrite};
+use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
