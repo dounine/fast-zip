@@ -1,10 +1,10 @@
 use crate::magic::Magic;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
-use fast_stream::len::Len;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use std::io::{Cursor, Read, Seek, SeekFrom, Write};
+use fast_stream::length::Len;
 
 #[derive(Debug)]
 pub struct EoCd {
@@ -35,7 +35,7 @@ impl EoCd {
     pub fn find_offset<T: Read + Write + Seek>(stream: &mut Stream<T>) -> std::io::Result<u64> {
         let max_eocd_size: u64 = u16::MAX as u64 + 22;
         let mut search_size: u64 = 22; //最快的搜索
-        let file_size = stream.len()?;
+        let file_size = stream.length()?;
 
         if file_size < search_size {
             return Err(std::io::Error::new(
