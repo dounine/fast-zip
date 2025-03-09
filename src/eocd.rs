@@ -3,8 +3,7 @@ use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
-use std::io::{Cursor, Read, Seek, SeekFrom, Write};
-use fast_stream::length::Len;
+use std::io::{Seek, SeekFrom};
 
 #[derive(Debug)]
 pub struct EoCd {
@@ -28,14 +27,14 @@ impl ValueWrite for EoCd {
         output.write_value(&self.size)?;
         output.write_value(&self.offset)?;
         output.write_value(&self.comment_length)?;
-        Ok(output.take_data())
+        output.into()
     }
 }
 impl EoCd {
-    pub fn find_offset<T: Read + Write + Seek>(stream: &mut Stream<T>) -> std::io::Result<u64> {
+    pub fn find_offset(stream: &mut Stream) -> std::io::Result<u64> {
         let max_eocd_size: u64 = u16::MAX as u64 + 22;
         let mut search_size: u64 = 22; //最快的搜索
-        let file_size = stream.length()?;
+        let file_size = stream.length;
 
         if file_size < search_size {
             return Err(std::io::Error::new(
@@ -73,8 +72,8 @@ impl EoCd {
     }
 }
 
-impl<T: Read + Write + Seek> ValueRead<T> for EoCd {
-    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
+impl ValueRead for EoCd {
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
         let eocd_offset = Self::find_offset(stream)?;
         stream.seek(SeekFrom::End(-(eocd_offset as i64)))?;
         stream.seek(SeekFrom::Current(4))?;

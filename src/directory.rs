@@ -1,13 +1,13 @@
 use crate::magic::Magic;
-use derive::NumToEnum;
+// use derive::NumToEnum;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
+use fast_stream::derive::NumToEnum;
 use fast_stream::endian::Endian;
 use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
-use miniz_oxide::deflate::compress_to_vec_zlib;
 use miniz_oxide::inflate::decompress_to_vec;
-use std::io::{Cursor, Error, ErrorKind, Read, Seek, SeekFrom, Write};
+use std::io::{Error, ErrorKind, Read, Seek, SeekFrom};
 
 #[repr(u16)]
 #[derive(Debug, Clone, Default, NumToEnum)]
@@ -26,10 +26,15 @@ pub enum CompressionType {
     PPMd = 0x0062,
     AES = 0x0063,
 }
+impl CompressionType {
+    pub const fn byte_size() -> usize {
+        2
+    }
+}
 enum_to_bytes!(CompressionType, u16);
-const ZIP_FILE_HEADER_SIZE: usize = size_of::<Magic>()
+const ZIP_FILE_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 2
-    + size_of::<CompressionType>()
+    + CompressionType::byte_size()
     + size_of::<u16>() * 2
     + size_of::<u32>() * 3
     + size_of::<u16>() * 2;
@@ -66,22 +71,11 @@ impl ValueWrite for ZipFile {
         stream.write_value(&self.extra_field_length)?;
         stream.write_value(&self.file_name)?;
         // stream.write_value(&self.extra_field)?;
-        Ok(stream.take_data())
+        stream.take_data()
     }
 }
 impl ZipFile {
     pub fn size(&self) -> usize {
-        // size_of::<Magic>()
-        //     + size_of_val(&self.min_version)
-        //     + size_of_val(&self.bit_flag)
-        //     + size_of_val(&self.compression_method)
-        //     + size_of_val(&self.last_modification_time)
-        //     + size_of_val(&self.last_modification_date)
-        //     + size_of_val(&self.crc_32_uncompressed_data)
-        //     + size_of_val(&self.compressed_size)
-        //     + size_of_val(&self.uncompressed_size)
-        //     + size_of_val(&self.file_name_length)
-        //     + size_of_val(&self.extra_field_length)
         ZIP_FILE_HEADER_SIZE
             + self.file_name.as_bytes().len()
             + self.extra_field.len()
@@ -89,25 +83,20 @@ impl ZipFile {
     }
 }
 impl ZipFile {
-    pub fn origin_data<T: Read + Write + Seek>(
-        &self,
-        stream: &mut Stream<T>,
-    ) -> std::io::Result<Vec<u8>> {
+    pub fn origin_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
         stream.seek(SeekFrom::Start(self.data_position))?;
-        let data = stream.read_size(self.compressed_size as u64)?;
+        let mut data = vec![0_u8; self.compressed_size as usize];
+        stream.read_exact(&mut data)?;
         stream.un_pin()?;
         Ok(data)
     }
-    pub fn un_compressed_data<T: Read + Write + Seek>(
-        &self,
-        stream: &mut Stream<T>,
-    ) -> std::io::Result<Vec<u8>> {
+    pub fn un_compressed_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
         let compressed_data = stream.read_size(self.compressed_size as u64)?;
         let data = if self.uncompressed_size != self.compressed_size {
             let uncompress_data = decompress_to_vec(&compressed_data)
-                .map_err(|e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
+                .map_err(|_e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
             uncompress_data
         } else {
             compressed_data
@@ -117,8 +106,8 @@ impl ZipFile {
     }
 }
 
-impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
-    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
+impl ValueRead for ZipFile {
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::File {
             return Err(Error::new(
@@ -151,7 +140,7 @@ impl<T: Read + Write + Seek> ValueRead<T> for ZipFile {
         Ok(file)
     }
 }
-const DIRECTORY_HEADER_SIZE: usize = size_of::<Magic>()
+const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 6
     + size_of::<u32>() * 3
     + size_of::<u16>() * 5
@@ -211,11 +200,11 @@ impl ValueWrite for Directory {
         stream.write_value(&self.file_name)?;
         stream.write_value(&self.extra_field)?;
         stream.write_value(&self.file_comment)?;
-        Ok(stream.take_data())
+        stream.into()
     }
 }
-impl<T: Read + Write + Seek> ValueRead<T> for Directory {
-    fn read(stream: &mut Stream<T>) -> std::io::Result<Self> {
+impl ValueRead for Directory {
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
             return Err(Error::new(
@@ -223,7 +212,7 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
                 "Invalid directory magic number",
             ));
         }
-        let mut file = ZipFile::default();
+        let file = ZipFile::default();
         let mut info = Self {
             version: stream.read_value()?,
             min_version: stream.read_value()?,
@@ -257,6 +246,7 @@ impl<T: Read + Write + Seek> ValueRead<T> for Directory {
         let file: ZipFile = stream.read_value()?;
         stream.un_pin()?;
         info.file = file;
+        println!("{:?}", info);
         Ok(info)
     }
 }

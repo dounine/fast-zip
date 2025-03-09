@@ -1,12 +1,12 @@
 // use crate::stream::stream::Stream;
-use derive::NumToEnum;
+// use derive::NumToEnum;
 // use std::io::{Read, Seek, SeekFrom};
 use crate::error::ZipError;
 use crate::zip::Zip;
-use fast_stream::stream::Stream;
+use fast_stream::stream::{Data, Stream};
 use std::io::Cursor;
-use std::path::Prefix::Verbatim;
-use std::{fs, io};
+use std::{fs};
+use fast_stream::length::Len;
 
 mod directory;
 mod eocd;
@@ -14,18 +14,10 @@ mod error;
 mod magic;
 mod zip;
 
-#[repr(u32)]
-#[derive(Debug, NumToEnum)]
-pub enum Cpu {
-    X84 = 1,
-    Arm = 2,
-    Hello = 3 | 4,
-    Unknown(u32),
-}
-
 fn main() -> Result<(), ZipError> {
     let zip_file = fs::File::open("./data/hello.zip")?;
-    let stream = Stream::new(zip_file);
+    let mut stream = Stream::new(Data::File(zip_file));
+    stream.init_length()?;
     let mut zip = Zip::new(stream);
     zip.parse()?;
 

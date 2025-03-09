@@ -7,13 +7,13 @@ use fast_stream::stream::Stream;
 use std::io::{Read, Seek, SeekFrom, Write};
 
 #[derive(Debug)]
-pub struct Zip<T> {
-    stream: Stream<T>,
+pub struct Zip {
+    stream: Stream,
     pub eo_cd: Option<EoCd>,
     pub directories: Vec<Directory>,
 }
-impl<T: Read + Write + Seek> Zip<T> {
-    pub fn new(stream: Stream<T>) -> Self {
+impl Zip {
+    pub fn new(stream: Stream) -> Self {
         Self {
             stream,
             eo_cd: None,
@@ -39,6 +39,7 @@ impl<T: Read + Write + Seek> Zip<T> {
         for director in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
             files_size += director.file.size();
+            println!("file size {}", files_size);
             directors_size += director.size();
         }
         if let Some(eocd) = &mut self.eo_cd {
