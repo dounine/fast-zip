@@ -86,14 +86,13 @@ impl ZipFile {
     pub fn origin_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
         stream.seek(SeekFrom::Start(self.data_position))?;
-        let mut data = vec![0_u8; self.compressed_size as usize];
-        stream.read_exact(&mut data)?;
+        let data = stream.read_exact_size(self.compressed_size as u64)?;
         stream.un_pin()?;
         Ok(data)
     }
     pub fn un_compressed_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
-        let compressed_data = stream.read_size(self.compressed_size as u64)?;
+        let compressed_data = stream.read_exact_size(self.compressed_size as u64)?;
         let data = if self.uncompressed_size != self.compressed_size {
             let uncompress_data = decompress_to_vec(&compressed_data)
                 .map_err(|_e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
@@ -130,11 +129,11 @@ impl ValueRead for ZipFile {
             extra_field: vec![],
             data_position: 0,
         };
-        let file_name = stream.read_size(file.file_name_length as u64)?;
+        let file_name = stream.read_exact_size(file.file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
         file.file_name = file_name.clone();
-        file.extra_field = stream.read_size(file.extra_field_length as u64)?;
+        file.extra_field = stream.read_exact_size(file.extra_field_length as u64)?;
         file.data_position = stream.stream_position()?;
         // let data = file.un_compressed_data(stream)?;
         Ok(file)
@@ -235,18 +234,17 @@ impl ValueRead for Directory {
             file_comment: vec![],
             file,
         };
-        let file_name = stream.read_size(info.file_name_length as u64)?;
+        let file_name = stream.read_exact_size(info.file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
         info.file_name = file_name;
-        info.extra_field = stream.read_size(info.extra_field_length as u64)?;
-        info.file_comment = stream.read_size(info.file_comment_length as u64)?;
+        info.extra_field = stream.read_exact_size(info.extra_field_length as u64)?;
+        info.file_comment = stream.read_exact_size(info.file_comment_length as u64)?;
         stream.pin()?;
         stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
         let file: ZipFile = stream.read_value()?;
         stream.un_pin()?;
         info.file = file;
-        println!("{:?}", info);
         Ok(info)
     }
 }

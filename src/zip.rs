@@ -39,7 +39,6 @@ impl Zip {
         for director in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
             files_size += director.file.size();
-            println!("file size {}", files_size);
             directors_size += director.size();
         }
         if let Some(eocd) = &mut self.eo_cd {
