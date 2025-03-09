@@ -7,7 +7,7 @@ use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use miniz_oxide::inflate::decompress_to_vec;
-use std::io::{Error, ErrorKind, Read, Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Seek, SeekFrom};
 
 #[repr(u16)]
 #[derive(Debug, Clone, Default, NumToEnum)]
@@ -90,6 +90,7 @@ impl ZipFile {
         stream.un_pin()?;
         Ok(data)
     }
+    #[allow(dead_code)]
     pub fn un_compressed_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
         let compressed_data = stream.read_exact_size(self.compressed_size as u64)?;

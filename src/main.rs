@@ -6,7 +6,6 @@ use crate::zip::Zip;
 use fast_stream::stream::{Data, Stream};
 use std::io::Cursor;
 use std::{fs};
-use fast_stream::length::Len;
 
 mod directory;
 mod eocd;
@@ -16,8 +15,7 @@ mod zip;
 
 fn main() -> Result<(), ZipError> {
     let zip_file = fs::File::open("./data/hello.zip")?;
-    let mut stream = Stream::new(Data::File(zip_file));
-    stream.init_length()?;
+    let stream = Stream::new(Data::File(zip_file));
     let mut zip = Zip::new(stream);
     zip.parse()?;
 
