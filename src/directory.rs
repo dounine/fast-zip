@@ -55,7 +55,7 @@ pub struct ZipFile {
     pub data_position: u64,
 }
 impl ValueWrite for ZipFile {
-    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(&Magic::File)?;
@@ -71,7 +71,7 @@ impl ValueWrite for ZipFile {
         stream.write_value(&self.extra_field_length)?;
         stream.write_value(&self.file_name)?;
         // stream.write_value(&self.extra_field)?;
-        stream.take_data()
+        Ok(stream)
     }
 }
 impl ZipFile {
@@ -177,7 +177,7 @@ impl Directory {
     }
 }
 impl ValueWrite for Directory {
-    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(&Magic::Directory)?;
@@ -200,7 +200,7 @@ impl ValueWrite for Directory {
         stream.write_value(&self.file_name)?;
         stream.write_value(&self.extra_field)?;
         stream.write_value(&self.file_comment)?;
-        stream.into()
+        Ok(stream)
     }
 }
 impl ValueRead for Directory {

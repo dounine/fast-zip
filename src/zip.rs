@@ -4,7 +4,7 @@ use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub struct Zip {
@@ -49,21 +49,24 @@ impl Zip {
 
         Ok(())
     }
-    pub fn write<O: Read + Write + Seek>(&mut self, output: &mut O) -> Result<(), ZipError> {
+    pub fn write(&mut self, output: &mut Stream) -> Result<(), ZipError> {
         let endian = Endian::Little;
         self.computer()?;
         for director in &mut self.directories {
             let extra_field = std::mem::take(&mut director.file.extra_field);
-            output.write(&director.file.write(&endian)?)?;
+            let data = director.file.write(&endian)?;
+            output.merge(data)?;
             output.write(&extra_field)?;
             let mut data = director.file.origin_data(&mut self.stream)?;
             output.write(&mut data)?;
         }
         for director in &mut self.directories {
-            output.write(&director.write(&endian)?)?;
+            let data = director.write(&endian)?;
+            output.merge(data)?;
         }
         if let Some(eo_cd) = &self.eo_cd {
-            output.write(&eo_cd.write(&endian)?)?;
+            let data = eo_cd.write(&endian)?;
+            output.merge(data)?;
         }
         Ok(())
     }

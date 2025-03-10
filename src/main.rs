@@ -4,7 +4,6 @@
 use crate::error::ZipError;
 use crate::zip::Zip;
 use fast_stream::stream::{Data, Stream};
-use std::io::Cursor;
 use std::{fs};
 
 mod directory;
@@ -19,12 +18,11 @@ fn main() -> Result<(), ZipError> {
     let mut zip = Zip::new(stream);
     zip.parse()?;
 
-    let mut data: Vec<u8> = vec![];
-    let mut output = Cursor::new(&mut data);
+    let mut output = Stream::new(vec![].into());
     zip.write(&mut output)?;
 
     // println!("{:?}", data);
-    fs::write("./data/copy.zip", &mut data)?;
+    fs::write("./data/copy.zip", output.take_data().unwrap())?;
 
     // let value: u8 = stream.read_value()?;
     // let value = stream.seek(SeekFrom::End(-22))?;

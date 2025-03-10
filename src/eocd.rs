@@ -16,7 +16,7 @@ pub struct EoCd {
     pub comment_length: u16,
 }
 impl ValueWrite for EoCd {
-    fn write(&self, endian: &Endian) -> std::io::Result<Vec<u8>> {
+    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
         let mut output = Stream::empty();
         output.with_endian(endian.clone());
         output.write_value(&Magic::EoCd)?;
@@ -27,7 +27,7 @@ impl ValueWrite for EoCd {
         output.write_value(&self.size)?;
         output.write_value(&self.offset)?;
         output.write_value(&self.comment_length)?;
-        output.into()
+        Ok(output)
     }
 }
 impl EoCd {
