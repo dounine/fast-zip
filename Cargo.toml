@@ -3,6 +3,11 @@ name = "fast-zip"
 version = "0.1.0"
 edition = "2021"
 
+exclude = ["example"]
+
+[workspace]
+members = ["example", "."]
+
 [dependencies]
 thiserror = "2.0"
 miniz_oxide = "0.8.2"
