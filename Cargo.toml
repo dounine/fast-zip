@@ -8,12 +8,14 @@ exclude = ["example"]
 [workspace]
 members = ["example", "."]
 
-[dependencies.fast_stream]
+[dependencies.fast-stream]
 path = "/Users/lake/dounine/github/ipa/fast-stream"
 
 [features]
 default = []
-all = ["fast_stream/all"]
+all = ["fast-stream/all"]
+file = ["fast-stream/file"]
+enum = ["fast-stream/enum"]
 
 [dependencies]
 thiserror = "2.0"

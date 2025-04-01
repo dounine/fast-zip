@@ -8,7 +8,7 @@ use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug)]
 pub struct Zip {
-    stream: Stream,
+    pub stream: Stream,
     pub eo_cd: Option<EoCd>,
     pub directories: Vec<Directory>,
 }
@@ -49,6 +49,16 @@ impl Zip {
 
         Ok(())
     }
+    pub fn get_mut(&mut self, file_name: &str) -> Option<&mut Directory> {
+        self.directories
+            .iter_mut()
+            .find(|e| e.file_name == file_name)
+    }
+    pub fn get(&mut self, file_name: &str) -> Option<&Directory> {
+        self.directories
+            .iter()
+            .find(|e| e.file_name == file_name)
+    }
     pub fn write(&mut self, output: &mut Stream) -> Result<(), ZipError> {
         let endian = Endian::Little;
         self.computer()?;
@@ -57,7 +67,7 @@ impl Zip {
             let data = director.file.write(&endian)?;
             output.merge(data)?;
             output.write(&extra_field)?;
-            let mut data = director.file.origin_data(&mut self.stream)?;
+            let mut data = director.origin_data(&mut self.stream)?;
             output.write(&mut data)?;
         }
         for director in &mut self.directories {

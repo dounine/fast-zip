@@ -82,18 +82,17 @@ impl ZipFile {
             + self.compressed_size as usize
     }
 }
-impl ZipFile {
+impl Directory {
     pub fn origin_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
-        stream.seek(SeekFrom::Start(self.data_position))?;
+        stream.seek(SeekFrom::Start(self.file.data_position))?;
         let data = stream.read_exact_size(self.compressed_size as u64)?;
         stream.un_pin()?;
         Ok(data)
     }
     #[allow(dead_code)]
     pub fn un_compressed_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
-        stream.pin()?;
-        let compressed_data = stream.read_exact_size(self.compressed_size as u64)?;
+        let compressed_data = self.origin_data(stream)?;
         let data = if self.uncompressed_size != self.compressed_size {
             let uncompress_data = decompress_to_vec(&compressed_data)
                 .map_err(|_e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
@@ -101,7 +100,6 @@ impl ZipFile {
         } else {
             compressed_data
         };
-        stream.un_pin()?;
         Ok(data)
     }
 }
@@ -150,7 +148,7 @@ pub struct Directory {
     pub version: u16,
     pub min_version: u16,
     pub bit_flag: u16,
-    pub compression_method: u16,
+    pub compression_method: CompressionType,
     pub last_modification_time: u16,
     pub last_modification_date: u16,
     pub crc_32_uncompressed_data: u32,
