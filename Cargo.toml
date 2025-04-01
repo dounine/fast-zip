@@ -8,7 +8,13 @@ exclude = ["example"]
 [workspace]
 members = ["example", "."]
 
+[dependencies.fast_stream]
+path = "/Users/lake/dounine/github/ipa/fast-stream"
+
+[features]
+default = []
+all = ["fast_stream/all"]
+
 [dependencies]
 thiserror = "2.0"
 miniz_oxide = "0.8.2"
-fast_stream = { path = "/Users/lake/dounine/github/ipa/fast-stream", features = ["enum"] }
