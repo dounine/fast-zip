@@ -12,11 +12,12 @@ members = ["example", "."]
 path = "/Users/lake/dounine/github/ipa/fast-stream"
 
 [features]
-default = []
+default = ["crc32", "deflate"]
 all = ["fast-stream/all"]
 file = ["fast-stream/file"]
 enum = ["fast-stream/enum"]
+deflate = ["fast-stream/deflate"]
+crc32 = ["fast-stream/crc32"]
 
 [dependencies]
 thiserror = "2.0"
-miniz_oxide = "0.8.2"

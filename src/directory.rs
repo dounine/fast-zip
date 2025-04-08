@@ -6,7 +6,6 @@ use fast_stream::endian::Endian;
 use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
-use miniz_oxide::inflate::decompress_to_vec;
 use std::io::{Error, ErrorKind, Seek, SeekFrom};
 
 #[repr(u16)]
@@ -79,27 +78,17 @@ impl ZipFile {
         ZIP_FILE_HEADER_SIZE
             + self.file_name.as_bytes().len()
             + self.extra_field.len()
-            + self.compressed_size as usize
     }
 }
-impl Directory {
+impl<'a> Directory<'a> {
+    pub fn set_data(&mut self, stream: &'a mut Stream) {
+        self.data = Some(stream)
+    }
     pub fn origin_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         stream.pin()?;
         stream.seek(SeekFrom::Start(self.file.data_position))?;
         let data = stream.read_exact_size(self.compressed_size as u64)?;
         stream.un_pin()?;
-        Ok(data)
-    }
-    #[allow(dead_code)]
-    pub fn un_compressed_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
-        let compressed_data = self.origin_data(stream)?;
-        let data = if self.uncompressed_size != self.compressed_size {
-            let uncompress_data = decompress_to_vec(&compressed_data)
-                .map_err(|_e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
-            uncompress_data
-        } else {
-            compressed_data
-        };
         Ok(data)
     }
 }
@@ -144,7 +133,8 @@ const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 5
     + size_of::<u32>() * 2;
 #[derive(Debug)]
-pub struct Directory {
+pub struct Directory<'a> {
+    pub data: Option<&'a mut Stream>,
     pub version: u16,
     pub min_version: u16,
     pub bit_flag: u16,
@@ -166,7 +156,7 @@ pub struct Directory {
     pub file_comment: Vec<u8>,
     pub file: ZipFile,
 }
-impl Directory {
+impl Directory<'_> {
     pub fn size(&self) -> usize {
         DIRECTORY_HEADER_SIZE
             + self.file_name.as_bytes().len()
@@ -174,7 +164,7 @@ impl Directory {
             + self.file_comment.len()
     }
 }
-impl ValueWrite for Directory {
+impl ValueWrite for Directory<'_> {
     fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
@@ -201,7 +191,7 @@ impl ValueWrite for Directory {
         Ok(stream)
     }
 }
-impl ValueRead for Directory {
+impl ValueRead for Directory<'_> {
     fn read(stream: &mut Stream) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
@@ -212,6 +202,7 @@ impl ValueRead for Directory {
         }
         let file = ZipFile::default();
         let mut info = Self {
+            data: None,
             version: stream.read_value()?,
             min_version: stream.read_value()?,
             bit_flag: stream.read_value()?,

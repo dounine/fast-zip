@@ -7,7 +7,7 @@ pub enum Magic {
     EoCd = 0x06054b50,
     Directory = 0x02014b50,
     File = 0x04034b50,
-    Unknown(u32),
+    // Unknown(u32),
 }
 impl Magic {
     pub const fn byte_size() -> usize {
