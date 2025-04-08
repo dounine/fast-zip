@@ -75,21 +75,23 @@ impl ValueWrite for ZipFile {
 }
 impl ZipFile {
     pub fn size(&self) -> usize {
-        ZIP_FILE_HEADER_SIZE
-            + self.file_name.as_bytes().len()
-            + self.extra_field.len()
+        ZIP_FILE_HEADER_SIZE + self.file_name.as_bytes().len() + self.extra_field.len()
     }
 }
 impl<'a> Directory<'a> {
     pub fn set_data(&mut self, stream: &'a mut Stream) {
         self.data = Some(stream)
     }
-    pub fn origin_data(&self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
-        stream.pin()?;
-        stream.seek(SeekFrom::Start(self.file.data_position))?;
-        let data = stream.read_exact_size(self.compressed_size as u64)?;
-        stream.un_pin()?;
-        Ok(data)
+    pub fn origin_data(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
+        if let Some(data) = &mut self.data {
+            data.copy_data()
+        } else {
+            stream.pin()?;
+            stream.seek(SeekFrom::Start(self.file.data_position))?;
+            let data = stream.read_exact_size(self.compressed_size as u64)?;
+            stream.un_pin()?;
+            Ok(data)
+        }
     }
 }
 
