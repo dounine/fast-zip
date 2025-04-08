@@ -34,7 +34,7 @@ impl EoCd {
     pub fn find_offset(stream: &mut Stream) -> std::io::Result<u64> {
         let max_eocd_size: u64 = u16::MAX as u64 + 22;
         let mut search_size: u64 = 22; //最快的搜索
-        let file_size = stream.length;
+        let file_size = stream.length();
 
         if file_size < search_size {
             return Err(std::io::Error::new(

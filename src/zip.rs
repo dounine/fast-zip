@@ -9,12 +9,12 @@ use fast_stream::stream::Stream;
 use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug)]
-pub struct Zip<'a> {
+pub struct Zip {
     pub stream: Stream,
     pub eo_cd: Option<EoCd>,
-    pub directories: Vec<Directory<'a>>,
+    pub directories: Vec<Directory>,
 }
-impl<'a> Zip<'a> {
+impl Zip {
     pub fn new(stream: Stream) -> Self {
         Self {
             stream,
@@ -35,11 +35,11 @@ impl<'a> Zip<'a> {
 
         Ok(())
     }
-    pub fn add_directory(&mut self, data: &'a mut Stream, file_name: &str) -> Result<(), ZipError> {
+    pub fn add_directory(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
         let file_name_length = file_name.as_bytes().len() as u16;
-        let data_len = data.length;
+        let data_len = data.length();
         let crc_32_uncompressed_data = data.crc32_value()? & 0xFFFFFFFF;
-        let compressed_size = data.compress_self(CompressionLevel::DefaultLevel)? as u32;
+        let compressed_size = data.compress(CompressionLevel::DefaultLevel)? as u32;
         self.directories.push(Directory {
             data: Some(data),
             version: 0,
@@ -94,7 +94,7 @@ impl<'a> Zip<'a> {
         }
         Ok(())
     }
-    pub fn get_mut(&mut self, file_name: &str) -> Option<&'a mut Directory> {
+    pub fn get_mut(&mut self, file_name: &str) -> Option<&mut Directory> {
         self.directories
             .iter_mut()
             .find(|e| e.file_name == file_name)
