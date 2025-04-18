@@ -41,6 +41,7 @@ impl Zip {
         let crc_32_uncompressed_data = data.crc32_value()? & 0xFFFFFFFF;
         let compressed_size = data.compress(CompressionLevel::DefaultLevel)? as u32;
         self.directories.push(Directory {
+            uncompressed: false,
             data: Some(data),
             version: 0,
             min_version: 20,

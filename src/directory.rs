@@ -81,6 +81,10 @@ impl ZipFile {
 }
 impl Directory {
     pub fn set_data(&mut self, stream: Stream) {
+        self.compression_method = CompressionType::Store;
+        self.compressed_size = 0;
+        self.uncompressed_size = *stream.length.borrow() as u32;
+        self.uncompressed = true;
         self.data = Some(stream)
     }
     pub fn decompressed(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
@@ -88,8 +92,6 @@ impl Directory {
         let data = if self.compression_method == CompressionType::Deflate {
             let mut data = Stream::new(compressed_data.into());
             data.decompress()?;
-            // let uncompress_data = decompress_to_vec(&compressed_data)
-            //     .map_err(|_e| Error::new(ErrorKind::InvalidData, std::fmt::Error::default()))?;
             data.take_data()?
         } else {
             compressed_data
@@ -150,6 +152,7 @@ const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u32>() * 2;
 #[derive(Debug)]
 pub struct Directory {
+    pub uncompressed: bool,
     pub data: Option<Stream>,
     pub version: u16,
     pub min_version: u16,
@@ -218,6 +221,7 @@ impl ValueRead for Directory {
         }
         let file = ZipFile::default();
         let mut info = Self {
+            uncompressed: false,
             data: None,
             version: stream.read_value()?,
             min_version: stream.read_value()?,
