@@ -1,4 +1,4 @@
-use crate::directory::{CompressionType, Directory, ZipFile};
+use crate::directory::{CompressionType, Directory, ExtendedTimestamp, Extra, ZipFile};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
@@ -6,6 +6,7 @@ use fast_stream::crc32::CRC32;
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
+use fast_stream::vec;
 use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug)]
@@ -36,6 +37,7 @@ impl Zip {
         Ok(())
     }
     pub fn add_directory(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
+        self.directories.retain(|v| v.file_name != file_name);
         let file_name_length = file_name.as_bytes().len() as u16;
         let data_len = data.length();
         let crc_32_uncompressed_data = data.crc32_value()? & 0xFFFFFFFF;
@@ -53,14 +55,18 @@ impl Zip {
             compressed_size,
             uncompressed_size: data_len as u32,
             file_name_length,
-            extra_field_length: 0,
+            extra_field_length: 3,
             file_comment_length: 0,
             number_of_starts: 0,
             internal_file_attributes: 0,
             external_file_attributes: 0,
             offset_of_local_file_header: 0,
             file_name: file_name.to_string(),
-            extra_field: vec![],
+            extra_fields: vec![Extra::ExtendedTimestamp(ExtendedTimestamp {
+                modified_time: None,
+                access_time: None,
+                create_time: None,
+            })],
             file_comment: vec![],
             file: ZipFile {
                 min_version: 20,
@@ -72,9 +78,13 @@ impl Zip {
                 compressed_size,
                 uncompressed_size: data_len as u32,
                 file_name_length,
-                extra_field_length: 0,
+                extra_field_length: 3,
                 file_name: file_name.to_string(),
-                extra_field: vec![],
+                extra_fields: vec![Extra::ExtendedTimestamp(ExtendedTimestamp {
+                    modified_time: None,
+                    access_time: None,
+                    create_time: None,
+                })],
                 data_position: 0,
             },
         });
@@ -107,10 +117,10 @@ impl Zip {
         let endian = Endian::Little;
         self.computer()?;
         for director in &mut self.directories {
-            let extra_field = std::mem::take(&mut director.file.extra_field);
+            // let extra_field = std::mem::take(&mut director.file.extra_field);
             let data = director.file.write(&endian)?;
             output.merge(data)?;
-            output.write(&extra_field)?;
+            // output.write(&extra_field)?;
             let mut data = director.origin_data(&mut self.stream)?;
             output.write(&mut data)?;
         }
