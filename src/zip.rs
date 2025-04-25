@@ -1,4 +1,4 @@
-use crate::directory::{CompressionType, Directory, Extra, Size, ZipFile};
+use crate::directory::{CompressionType, Directory, Extra, ZipFile};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
@@ -6,7 +6,6 @@ use fast_stream::crc32::CRC32;
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
-use fast_stream::vec;
 use std::io::{Seek, SeekFrom, Write};
 
 #[derive(Debug)]
@@ -46,11 +45,11 @@ impl Zip {
             compressed: true,
             data: Some(data),
             version: 798,
-            min_version: 10,
+            min_version: 20,
             bit_flag: 0,
             compression_method: CompressionType::Deflate,
-            last_modification_time: 407,
-            last_modification_date: 23084,
+            last_modification_time: 35155,
+            last_modification_date: 23078,
             crc_32_uncompressed_data,
             compressed_size,
             uncompressed_size: data_len as u32,
@@ -71,12 +70,12 @@ impl Zip {
                 Extra::UnixAttrs { uid: 503, gid: 20 },
             ],
             file_comment: vec![],
-            file: ZipFile {
-                min_version: 10,
+            file: Some(ZipFile {
+                min_version: 20,
                 bit_flag: 0,
                 compression_method: CompressionType::Deflate,
-                last_modification_time: 407,
-                last_modification_date: 23084,
+                last_modification_time: 35155,
+                last_modification_date: 23078,
                 crc_32_uncompressed_data,
                 compressed_size,
                 uncompressed_size: data_len as u32,
@@ -86,24 +85,26 @@ impl Zip {
                 extra_fields: vec![
                     Extra::UnixExtendedTimestamp {
                         mtime: Some(1736154637),
-                        atime: None,
+                        atime: Some(1736195293),
                         ctime: None,
                     },
                     Extra::UnixAttrs { uid: 503, gid: 20 },
                 ],
                 data_position: 0,
-            },
+            }),
         };
         let mut extra_field_length = 0;
         for extra_field in &directory.extra_fields {
-            extra_field_length += extra_field.field_size(true);
+            extra_field_length += extra_field.size(true);
         }
         directory.extra_field_length = extra_field_length;
         let mut extra_field_length = 0;
-        for extra_field in &directory.file.extra_fields {
-            extra_field_length += extra_field.field_size(false);
+        if let Some(file) = &mut directory.file {
+            for extra_field in &file.extra_fields {
+                extra_field_length += extra_field.size(false);
+            }
+            file.extra_field_length = extra_field_length;
         }
-        directory.file.extra_field_length = extra_field_length;
         self.directories.push(directory);
         Ok(())
     }
@@ -112,13 +113,15 @@ impl Zip {
         let mut directors_size = 0;
         for director in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
-            files_size += director.file.size(false) + director.compressed_size as usize;
+            if let Some(file) = &mut director.file {
+                files_size += file.size(false) + director.compressed_size as usize;
+            }
             directors_size += director.size(true);
         }
-        if let Some(eocd) = &mut self.eo_cd {
-            eocd.size = directors_size as u32;
-            eocd.entries = self.directories.len() as u16;
-            eocd.offset = files_size as u32;
+        if let Some(eo_cd) = &mut self.eo_cd {
+            eo_cd.size = directors_size as u32;
+            eo_cd.entries = self.directories.len() as u16;
+            eo_cd.offset = files_size as u32;
         }
         Ok(())
     }
@@ -134,16 +137,20 @@ impl Zip {
         let endian = Endian::Little;
         self.computer()?;
         for director in &mut self.directories {
-            let data = director.file.write(&endian)?;
-            output.merge(data)?;
-            let mut data = director.origin_data(&mut self.stream)?;
-            output.write(&mut data)?;
+            if let Some(file) = director.file.take() {
+                let position = file.data_position;
+                let data = file.write(&endian)?;
+                output.merge(data)?;
+                let mut data = director.origin_data(position, &mut self.stream)?;
+                output.write(&mut data)?;
+            }
         }
-        for director in &mut self.directories {
-            let data = director.write_args(&endian, Some(true))?;
+        let directories = std::mem::take(&mut self.directories);
+        for director in directories {
+            let data = director.write_args(&endian, &Some(true))?;
             output.merge(data)?;
         }
-        if let Some(eo_cd) = &self.eo_cd {
+        if let Some(eo_cd) = self.eo_cd.take() {
             let data = eo_cd.write(&endian)?;
             output.merge(data)?;
         }

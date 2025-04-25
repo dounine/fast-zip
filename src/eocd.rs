@@ -16,17 +16,17 @@ pub struct EoCd {
     pub comment_length: u16,
 }
 impl ValueWrite for EoCd {
-    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> std::io::Result<Stream> {
         let mut output = Stream::empty();
         output.with_endian(endian.clone());
-        output.write_value(&Magic::EoCd)?;
-        output.write_value(&self.number_of_disk)?;
-        output.write_value(&self.directory_starts)?;
-        output.write_value(&self.number_of_directory_disk)?;
-        output.write_value(&self.entries)?;
-        output.write_value(&self.size)?;
-        output.write_value(&self.offset)?;
-        output.write_value(&self.comment_length)?;
+        output.write_value(Magic::EoCd)?;
+        output.write_value(self.number_of_disk)?;
+        output.write_value(self.directory_starts)?;
+        output.write_value(self.number_of_directory_disk)?;
+        output.write_value(self.entries)?;
+        output.write_value(self.size)?;
+        output.write_value(self.offset)?;
+        output.write_value(self.comment_length)?;
         Ok(output)
     }
 }
@@ -73,7 +73,7 @@ impl EoCd {
 }
 
 impl ValueRead for EoCd {
-    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
         let eocd_offset = Self::find_offset(stream)?;
         stream.seek(SeekFrom::End(-(eocd_offset as i64)))?;
         stream.seek(SeekFrom::Current(4))?;

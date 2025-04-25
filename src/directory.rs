@@ -1,14 +1,13 @@
 use crate::magic::Magic;
-use std::fmt::{Debug, Formatter};
-// use derive::NumToEnum;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::deflate::Deflate;
 use fast_stream::derive::NumToEnum;
 use fast_stream::endian::Endian;
+use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
-use fast_stream::{enum_to_bytes, vec};
-use std::io::{Error, ErrorKind, Seek, SeekFrom, Write};
+use std::fmt::Debug;
+use std::io::{Error, ErrorKind, Seek, SeekFrom};
 pub trait Size {
     fn size(&self) -> usize;
 }
@@ -66,6 +65,9 @@ impl Extra {
             Some(_) => size_of::<T>() as u16,
         }
     }
+    pub fn size(&self, center: bool) -> u16 {
+        2 + 2 + self.field_size(center)
+    }
     pub fn field_size(&self, center: bool) -> u16 {
         match self {
             Extra::NTFS { .. } => 32,
@@ -100,20 +102,20 @@ impl Extra {
     }
 }
 impl ValueWrite for Extra {
-    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value(&self.header_id())?;
-        stream.write_value(&self.field_size(args.is_some()))?;
+        stream.write_value(self.header_id())?;
+        stream.write_value(self.field_size(args.is_some()))?;
         match self {
             Extra::NTFS {
                 mtime,
                 atime,
                 ctime,
             } => {
-                stream.write_value(&0_u32)?;
-                stream.write_value(&1_u16)?;
-                stream.write_value(&24_u16)?;
+                stream.write_value(0_u32)?;
+                stream.write_value(1_u16)?;
+                stream.write_value(24_u16)?;
                 stream.write_value(mtime)?;
                 stream.write_value(atime)?;
                 stream.write_value(ctime)?;
@@ -123,10 +125,10 @@ impl ValueWrite for Extra {
                 atime,
                 ctime,
             } => {
-                let flags = Self::if_present(*mtime, 1)
-                    | Self::if_present(*atime, 1 << 1)
-                    | Self::if_present(*ctime, 1 << 2);
-                stream.write_value(&flags)?;
+                let flags = Self::if_present(mtime, 1)
+                    | Self::if_present(atime, 1 << 1)
+                    | Self::if_present(ctime, 1 << 2);
+                stream.write_value(flags)?;
                 if let Some(mtime) = mtime {
                     stream.write_value(mtime)?;
                 }
@@ -140,10 +142,10 @@ impl ValueWrite for Extra {
                 }
             }
             Extra::UnixAttrs { uid, gid, .. } => {
-                stream.write_value(&1_u8)?;
-                stream.write_value(&4_u8)?;
+                stream.write_value(1_u8)?;
+                stream.write_value(4_u8)?;
                 stream.write_value(uid)?;
-                stream.write_value(&4_u8)?;
+                stream.write_value(4_u8)?;
                 stream.write_value(gid)?;
             }
         }
@@ -151,15 +153,13 @@ impl ValueWrite for Extra {
     }
 }
 impl ValueRead for Extra {
-    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
             0x5455 => {
                 let _length: u16 = stream.read_value()?;
                 let flags: u8 = stream.read_value()?;
-                let mut bytes: u16 = 1;
                 let mtime = if flags & 0x01 != 0 {
-                    bytes += 4;
                     Some(stream.read_value()?)
                 } else {
                     None
@@ -253,23 +253,23 @@ pub struct ZipFile {
     pub data_position: u64,
 }
 impl ValueWrite for ZipFile {
-    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value(&Magic::File)?;
-        stream.write_value(&self.min_version)?;
-        stream.write_value(&self.bit_flag)?;
-        stream.write_value(&self.compression_method)?;
-        stream.write_value(&self.last_modification_time)?;
-        stream.write_value(&self.last_modification_date)?;
-        stream.write_value(&self.crc_32_uncompressed_data)?;
-        stream.write_value(&self.compressed_size)?;
-        stream.write_value(&self.uncompressed_size)?;
-        stream.write_value(&self.file_name_length)?;
-        stream.write_value(&self.extra_field_length)?;
-        stream.write_value(&self.file_name)?;
-        for extra_field in &self.extra_fields {
-            stream.write_value(extra_field)?;
+        stream.write_value(Magic::File)?;
+        stream.write_value(self.min_version)?;
+        stream.write_value(self.bit_flag)?;
+        stream.write_value(self.compression_method)?;
+        stream.write_value(self.last_modification_time)?;
+        stream.write_value(self.last_modification_date)?;
+        stream.write_value(self.crc_32_uncompressed_data)?;
+        stream.write_value(self.compressed_size)?;
+        stream.write_value(self.uncompressed_size)?;
+        stream.write_value(self.file_name_length)?;
+        stream.write_value(self.extra_field_length)?;
+        stream.write_value(self.file_name)?;
+        for extra_field in self.extra_fields {
+            stream.write_value_args(extra_field, args)?;
         }
         Ok(stream)
     }
@@ -278,8 +278,7 @@ impl ZipFile {
     pub fn size(&self, center: bool) -> usize {
         let mut bytes = ZIP_FILE_HEADER_SIZE + self.file_name.as_bytes().len();
         for extra_field in &self.extra_fields {
-            //Extra ID length + length + data
-            bytes += 2 + 2 + extra_field.field_size(center) as usize
+            bytes += extra_field.size(center) as usize
         }
         bytes
     }
@@ -293,7 +292,12 @@ impl Directory {
         self.data = Some(stream)
     }
     pub fn decompressed(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
-        let compressed_data = self.origin_data(stream)?;
+        let position = if let Some(file) = &self.file {
+            file.data_position
+        } else {
+            0
+        };
+        let compressed_data = self.origin_data(position, stream)?;
         let data = if self.compression_method == CompressionType::Deflate {
             let mut data = Stream::new(compressed_data.into());
             data.decompress()?;
@@ -303,12 +307,13 @@ impl Directory {
         };
         Ok(data)
     }
-    pub fn origin_data(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
+    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
         if let Some(data) = &mut self.data {
+            data.seek_start()?;
             data.copy_data()
         } else {
             stream.pin()?;
-            stream.seek(SeekFrom::Start(self.file.data_position))?;
+            stream.seek(SeekFrom::Start(position))?;
             let data = stream.read_exact_size(self.compressed_size as u64)?;
             stream.un_pin()?;
             Ok(data)
@@ -317,7 +322,7 @@ impl Directory {
 }
 
 impl ValueRead for ZipFile {
-    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::File {
             return Err(Error::new(
@@ -358,7 +363,6 @@ impl ValueRead for ZipFile {
             }
         }
         file.data_position = stream.stream_position()?;
-        // let data = file.un_compressed_data(stream)?;
         Ok(file)
     }
 }
@@ -390,49 +394,49 @@ pub struct Directory {
     pub file_name: String,
     pub extra_fields: Vec<Extra>,
     pub file_comment: Vec<u8>,
-    pub file: ZipFile,
+    pub file: Option<ZipFile>,
 }
 impl Directory {
     pub fn size(&self, center: bool) -> usize {
         let mut bytes =
             DIRECTORY_HEADER_SIZE + self.file_name.as_bytes().len() + self.file_comment.len();
         for extra_field in &self.extra_fields {
-            bytes += 2 + 2 + extra_field.field_size(center) as usize
+            bytes += extra_field.size(center) as usize
         }
         bytes
     }
 }
 impl ValueWrite for Directory {
-    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value(&Magic::Directory)?;
-        stream.write_value(&self.version)?;
-        stream.write_value(&self.min_version)?;
-        stream.write_value(&self.bit_flag)?;
-        stream.write_value(&self.compression_method)?;
-        stream.write_value(&self.last_modification_time)?;
-        stream.write_value(&self.last_modification_date)?;
-        stream.write_value(&self.crc_32_uncompressed_data)?;
-        stream.write_value(&self.compressed_size)?;
-        stream.write_value(&self.uncompressed_size)?;
-        stream.write_value(&self.file_name_length)?;
-        stream.write_value(&self.extra_field_length)?;
-        stream.write_value(&self.file_comment_length)?;
-        stream.write_value(&self.number_of_starts)?;
-        stream.write_value(&self.internal_file_attributes)?;
-        stream.write_value(&self.external_file_attributes)?;
-        stream.write_value(&self.offset_of_local_file_header)?;
-        stream.write_value(&self.file_name)?;
-        for extra_field in &self.extra_fields {
+        stream.write_value(Magic::Directory)?;
+        stream.write_value(self.version)?;
+        stream.write_value(self.min_version)?;
+        stream.write_value(self.bit_flag)?;
+        stream.write_value(self.compression_method)?;
+        stream.write_value(self.last_modification_time)?;
+        stream.write_value(self.last_modification_date)?;
+        stream.write_value(self.crc_32_uncompressed_data)?;
+        stream.write_value(self.compressed_size)?;
+        stream.write_value(self.uncompressed_size)?;
+        stream.write_value(self.file_name_length)?;
+        stream.write_value(self.extra_field_length)?;
+        stream.write_value(self.file_comment_length)?;
+        stream.write_value(self.number_of_starts)?;
+        stream.write_value(self.internal_file_attributes)?;
+        stream.write_value(self.external_file_attributes)?;
+        stream.write_value(self.offset_of_local_file_header)?;
+        stream.write_value(self.file_name)?;
+        for extra_field in self.extra_fields {
             stream.write_value(extra_field)?;
         }
-        stream.write_value(&self.file_comment)?;
+        stream.write_value(self.file_comment)?;
         Ok(stream)
     }
 }
 impl ValueRead for Directory {
-    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
             return Err(Error::new(
@@ -477,7 +481,7 @@ impl ValueRead for Directory {
             file_name: "".to_string(),
             extra_fields: vec![],
             file_comment: vec![],
-            file,
+            file: Some(file),
         };
         let file_name = stream.read_exact_size(info.file_name_length as u64)?;
         let file_name =
@@ -487,7 +491,7 @@ impl ValueRead for Directory {
         if info.extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra = stream.read_value_args(Some(true))?; //.read_exact_size(file.extra_field_length as u64)?;
+                let extra_field: Extra = stream.read_value_args(&Some(true))?; //.read_exact_size(file.extra_field_length as u64)?;
                 info.extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;
@@ -501,7 +505,7 @@ impl ValueRead for Directory {
         stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
         let file: ZipFile = stream.read_value()?;
         stream.un_pin()?;
-        info.file = file;
+        info.file = Some(file);
         Ok(info)
     }
 }
