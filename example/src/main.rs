@@ -8,7 +8,7 @@ fn main() {
     let stream = Stream::new(data.into());
     let mut zip = Zip::new(stream);
     zip.parse().unwrap();
-    // let data = Stream::new("hello".as_bytes().to_vec().into());
+    let data = Stream::new("hello".as_bytes().to_vec().into());
     // zip.add_directory(data, "b.txt").unwrap();
 
     let mut output = Stream::new(vec![].into());

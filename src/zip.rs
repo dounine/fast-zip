@@ -1,4 +1,4 @@
-use crate::directory::{CompressionType, Directory, ExtendedTimestamp, Extra, ZipFile};
+use crate::directory::{CompressionType, Directory, Extra, Size, ZipFile};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
@@ -42,52 +42,69 @@ impl Zip {
         let data_len = data.length();
         let crc_32_uncompressed_data = data.crc32_value()? & 0xFFFFFFFF;
         let compressed_size = data.compress(CompressionLevel::DefaultLevel)? as u32;
-        self.directories.push(Directory {
-            uncompressed: false,
+        let mut directory = Directory {
+            compressed: true,
             data: Some(data),
-            version: 0,
-            min_version: 20,
+            version: 798,
+            min_version: 10,
             bit_flag: 0,
             compression_method: CompressionType::Deflate,
-            last_modification_time: 0,
-            last_modification_date: 0,
+            last_modification_time: 407,
+            last_modification_date: 23084,
             crc_32_uncompressed_data,
             compressed_size,
             uncompressed_size: data_len as u32,
             file_name_length,
-            extra_field_length: 3,
+            extra_field_length: 0,
             file_comment_length: 0,
             number_of_starts: 0,
-            internal_file_attributes: 0,
-            external_file_attributes: 0,
+            internal_file_attributes: 1,
+            external_file_attributes: 2175008768,
             offset_of_local_file_header: 0,
             file_name: file_name.to_string(),
-            extra_fields: vec![Extra::ExtendedTimestamp(ExtendedTimestamp {
-                modified_time: None,
-                access_time: None,
-                create_time: None,
-            })],
+            extra_fields: vec![
+                Extra::UnixExtendedTimestamp {
+                    mtime: Some(1736154637),
+                    atime: None,
+                    ctime: None,
+                },
+                Extra::UnixAttrs { uid: 503, gid: 20 },
+            ],
             file_comment: vec![],
             file: ZipFile {
-                min_version: 20,
+                min_version: 10,
                 bit_flag: 0,
                 compression_method: CompressionType::Deflate,
-                last_modification_time: 0,
-                last_modification_date: 0,
+                last_modification_time: 407,
+                last_modification_date: 23084,
                 crc_32_uncompressed_data,
                 compressed_size,
                 uncompressed_size: data_len as u32,
                 file_name_length,
-                extra_field_length: 3,
+                extra_field_length: 0,
                 file_name: file_name.to_string(),
-                extra_fields: vec![Extra::ExtendedTimestamp(ExtendedTimestamp {
-                    modified_time: None,
-                    access_time: None,
-                    create_time: None,
-                })],
+                extra_fields: vec![
+                    Extra::UnixExtendedTimestamp {
+                        mtime: Some(1736154637),
+                        atime: None,
+                        ctime: None,
+                    },
+                    Extra::UnixAttrs { uid: 503, gid: 20 },
+                ],
                 data_position: 0,
             },
-        });
+        };
+        let mut extra_field_length = 0;
+        for extra_field in &directory.extra_fields {
+            extra_field_length += extra_field.field_size(true);
+        }
+        directory.extra_field_length = extra_field_length;
+        let mut extra_field_length = 0;
+        for extra_field in &directory.file.extra_fields {
+            extra_field_length += extra_field.field_size(false);
+        }
+        directory.file.extra_field_length = extra_field_length;
+        self.directories.push(directory);
         Ok(())
     }
     fn computer(&mut self) -> Result<(), ZipError> {
@@ -95,8 +112,8 @@ impl Zip {
         let mut directors_size = 0;
         for director in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
-            files_size += director.file.size() + director.compressed_size as usize;
-            directors_size += director.size();
+            files_size += director.file.size(false) + director.compressed_size as usize;
+            directors_size += director.size(true);
         }
         if let Some(eocd) = &mut self.eo_cd {
             eocd.size = directors_size as u32;
@@ -117,15 +134,13 @@ impl Zip {
         let endian = Endian::Little;
         self.computer()?;
         for director in &mut self.directories {
-            // let extra_field = std::mem::take(&mut director.file.extra_field);
             let data = director.file.write(&endian)?;
             output.merge(data)?;
-            // output.write(&extra_field)?;
             let mut data = director.origin_data(&mut self.stream)?;
             output.write(&mut data)?;
         }
         for director in &mut self.directories {
-            let data = director.write(&endian)?;
+            let data = director.write_args(&endian, Some(true))?;
             output.merge(data)?;
         }
         if let Some(eo_cd) = &self.eo_cd {

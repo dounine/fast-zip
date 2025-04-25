@@ -1,4 +1,5 @@
 use crate::magic::Magic;
+use std::fmt::{Debug, Formatter};
 // use derive::NumToEnum;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::deflate::Deflate;
@@ -40,279 +41,191 @@ const ZIP_FILE_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 2
     + size_of::<u32>() * 3
     + size_of::<u16>() * 2;
-// #[repr(u16)]
-// #[derive(Debug, Clone, Default, PartialEq, NumToEnum)]
-// pub enum ExtraType {
-//     #[default]
-//     ZIP64 = 0x0001,
-//     ExtendedTimestamp = 0x5455,
-//     UnixExtraType = 0x7875,
-//     AESEncryptionInfo = 0x9901,
-//     NTFSTimestamp = 0x000A,
-//     Other(u16),
-// }
-// enum_to_bytes!(ExtraType, u16);
-// #[derive(Debug, Default)]
-// pub struct Extra {
-//     pub id: ExtraType,
-//     pub size: u16,
-//     pub data: Vec<u8>,
-// }
-#[derive(Debug)]
-pub struct ExtendedTimestamp {
-    pub modified_time: Option<u32>,
-    pub access_time: Option<u32>,
-    pub create_time: Option<u32>,
-}
-impl Size for ExtendedTimestamp {
-    fn size(&self) -> usize {
-        2 + 1
-            + if self.modified_time.is_some() { 4 } else { 0 }
-            + if self.access_time.is_some() { 4 } else { 0 }
-            + if self.create_time.is_some() { 4 } else { 0 }
-    }
-}
-#[derive(Debug, Default)]
-pub struct UnixExtraType {
-    length: u16,
-    version: u8,
-    uid_size: u8,
-    uid: u32,
-    gid_size: u8,
-    gid: u32,
-}
-
-impl ValueRead for UnixExtraType {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
-        Ok(Self {
-            length: stream.read_value()?,
-            version: stream.read_value()?,
-            uid_size: stream.read_value()?,
-            uid: stream.read_value()?,
-            gid_size: stream.read_value()?,
-            gid: stream.read_value()?,
-        })
-    }
-}
-impl ValueWrite for UnixExtraType {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        stream.write_value(&0x00b_u16)?; //11位长度
-        stream.write_value(&self.version)?;
-        stream.write_value(&self.uid_size)?;
-        stream.write_value(&self.uid)?;
-        stream.write_value(&self.gid_size)?;
-        stream.write_value(&self.gid)?;
-        Ok(stream)
-    }
-}
-impl Size for UnixExtraType {
-    fn size(&self) -> usize {
-        2 + 1 + 1 + 4 + 1 + 4
-    }
-}
-#[derive(Debug, Default)]
-pub struct NtfsTimestamp {
-    tag: u16,
-    size: u16,
-    modified_time: u64,
-    access_time: u64,
-    create_time: u64,
-}
-impl Size for NtfsTimestamp {
-    fn size(&self) -> usize {
-        2 + 2 + 8 + 8 + 8
-    }
-}
-impl ValueRead for NtfsTimestamp {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
-        let tag: u16 = stream.read_value()?;
-        if tag != 0x0001 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Tag is invalid in NtfsTimestamp",
-            ));
-        }
-        let size: u16 = stream.read_value()?;
-        if size != 24 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid NTFS Timestamps size",
-            ));
-        }
-        Ok(Self {
-            tag,
-            size,
-            modified_time: stream.read_value()?,
-            access_time: stream.read_value()?,
-            create_time: stream.read_value()?,
-        })
-    }
-}
-impl ValueWrite for NtfsTimestamp {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        stream.write_value(&0x0001_u16)?;
-        stream.write_value(&24_u16)?;
-        stream.write_value(&self.modified_time)?;
-        stream.write_value(&self.access_time)?;
-        stream.write_value(&self.create_time)?;
-        Ok(stream)
-    }
-}
-#[derive(Debug, Default)]
-pub struct ZIP64 {
-    size: u16,
-    uncompressed_size: Option<u64>,
-    compressed_size: Option<u64>,
-    local_header_offset: Option<u64>,
-    disk_number: Option<u32>,
-}
-impl Size for ZIP64 {
-    fn size(&self) -> usize {
-        self.uncompressed_size
-            .and_then(|_| Some(8))
-            .unwrap_or_default()
-            + self
-                .compressed_size
-                .and_then(|_| Some(8))
-                .unwrap_or_default()
-            + self
-                .local_header_offset
-                .and_then(|_| Some(8))
-                .unwrap_or_default()
-            + self.disk_number.and_then(|_| Some(8)).unwrap_or_default()
-    }
-}
-impl ValueWrite for ZIP64 {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        let mut size: u16 = 0;
-        if self.uncompressed_size.is_some() {
-            size += 8;
-        }
-        if self.compressed_size.is_some() {
-            size += 8;
-        }
-        if self.local_header_offset.is_some() {
-            size += 8;
-        }
-        if self.disk_number.is_some() {
-            size += 4;
-        }
-        stream.write_value(&size)?;
-        if let Some(value) = &self.uncompressed_size {
-            stream.write_value(value)?;
-        }
-        if let Some(value) = &self.compressed_size {
-            stream.write_value(value)?;
-        }
-        if let Some(value) = &self.local_header_offset {
-            stream.write_value(value)?;
-        }
-        if let Some(value) = &self.disk_number {
-            stream.write_value(value)?;
-        }
-        Ok(stream)
-    }
-}
-impl ValueRead for ZIP64 {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
-        let size: u16 = stream.read_value()?;
-        let mut bytes: u16 = size;
-        let uncompressed_size = if size >= 8 {
-            if bytes <= 0 {
-                None
-            } else {
-                bytes -= 8;
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        let compressed_size = if size >= 8 {
-            if bytes <= 0 {
-                None
-            } else {
-                bytes -= 8;
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        let local_header_offset = if size >= 8 {
-            if bytes <= 0 {
-                None
-            } else {
-                bytes -= 8;
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        let disk_number = if size >= 4 {
-            if bytes <= 0 {
-                None
-            } else {
-                bytes -= 4;
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        Ok(Self {
-            size,
-            uncompressed_size,
-            compressed_size,
-            local_header_offset,
-            disk_number,
-        })
-    }
-}
 //https://libzip.org/specifications/extrafld.txt
 #[derive(Debug)]
 pub enum Extra {
-    ZIP64(ZIP64),
-    NTFSTimestamp(NtfsTimestamp),
-    ExtendedTimestamp(ExtendedTimestamp),
-    UnixExtraType(UnixExtraType),
+    NTFS {
+        mtime: u64,
+        atime: u64,
+        ctime: u64,
+    },
+    UnixExtendedTimestamp {
+        mtime: Option<i32>,
+        atime: Option<i32>,
+        ctime: Option<i32>,
+    },
+    UnixAttrs {
+        uid: u32,
+        gid: u32,
+    },
+}
+impl Extra {
+    pub fn optional_field_size<T: Sized>(field: &Option<T>) -> u16 {
+        match field {
+            None => 0,
+            Some(_) => size_of::<T>() as u16,
+        }
+    }
+    pub fn field_size(&self, center: bool) -> u16 {
+        match self {
+            Extra::NTFS { .. } => 32,
+            Extra::UnixExtendedTimestamp {
+                mtime,
+                atime,
+                ctime,
+            } => {
+                1 + Self::optional_field_size(mtime) + {
+                    if !center {
+                        Self::optional_field_size(atime) + Self::optional_field_size(ctime)
+                    } else {
+                        0
+                    }
+                }
+            }
+            Extra::UnixAttrs { .. } => 11,
+        }
+    }
+    pub fn header_id(&self) -> u16 {
+        match self {
+            Extra::NTFS { .. } => 0x000a,
+            Extra::UnixExtendedTimestamp { .. } => 0x5455,
+            Extra::UnixAttrs { .. } => 0x7875,
+        }
+    }
+    pub fn if_present(val: Option<i32>, if_present: u8) -> u8 {
+        match val {
+            Some(_) => if_present,
+            None => 0,
+        }
+    }
 }
 impl ValueWrite for Extra {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
+        stream.write_value(&self.header_id())?;
+        stream.write_value(&self.field_size(args.is_some()))?;
         match self {
-            Extra::ZIP64(v) => {
-                stream.write_value(&0x0001_u16)?;
-                stream.write_value(v)?;
+            Extra::NTFS {
+                mtime,
+                atime,
+                ctime,
+            } => {
+                stream.write_value(&0_u32)?;
+                stream.write_value(&1_u16)?;
+                stream.write_value(&24_u16)?;
+                stream.write_value(mtime)?;
+                stream.write_value(atime)?;
+                stream.write_value(ctime)?;
             }
-            Extra::NTFSTimestamp(v) => {
-                stream.write_value(&0x000A_u16)?;
-                stream.write_value(v)?;
+            Extra::UnixExtendedTimestamp {
+                mtime,
+                atime,
+                ctime,
+            } => {
+                let flags = Self::if_present(*mtime, 1)
+                    | Self::if_present(*atime, 1 << 1)
+                    | Self::if_present(*ctime, 1 << 2);
+                stream.write_value(&flags)?;
+                if let Some(mtime) = mtime {
+                    stream.write_value(mtime)?;
+                }
+                if !args.is_some() {
+                    if let Some(atime) = atime {
+                        stream.write_value(atime)?;
+                    }
+                    if let Some(ctime) = ctime {
+                        stream.write_value(ctime)?;
+                    }
+                }
             }
-            Extra::ExtendedTimestamp(v) => {
-                stream.write_value(&0x5455_u16)?;
-                stream.write_value(v)?;
-            }
-            Extra::UnixExtraType(v) => {
-                stream.write_value(&0x7875_u16)?;
-                stream.write_value(v)?;
+            Extra::UnixAttrs { uid, gid, .. } => {
+                stream.write_value(&1_u8)?;
+                stream.write_value(&4_u8)?;
+                stream.write_value(uid)?;
+                stream.write_value(&4_u8)?;
+                stream.write_value(gid)?;
             }
         }
         Ok(stream)
     }
 }
 impl ValueRead for Extra {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
-            0x0001 => Self::ZIP64(stream.read_value()?),
-            0x5455 => Self::ExtendedTimestamp(stream.read_value()?),
-            0x7875 => Self::UnixExtraType(stream.read_value()?),
-            0x000A => Self::NTFSTimestamp(stream.read_value()?),
+            0x5455 => {
+                let _length: u16 = stream.read_value()?;
+                let flags: u8 = stream.read_value()?;
+                let mut bytes: u16 = 1;
+                let mtime = if flags & 0x01 != 0 {
+                    bytes += 4;
+                    Some(stream.read_value()?)
+                } else {
+                    None
+                };
+                let atime = if flags & 0x02 != 0 {
+                    if !args.is_some() {
+                        Some(stream.read_value()?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                let ctime = if flags & 0x04 != 0 {
+                    if !args.is_some() {
+                        Some(stream.read_value()?)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                if flags & 0xF8 != 0 {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "Flags is invalid in ExtendedTimestamp",
+                    ));
+                }
+                Self::UnixExtendedTimestamp {
+                    mtime,
+                    atime,
+                    ctime,
+                }
+            }
+            0x7875 => {
+                let _length: u16 = stream.read_value()?;
+                let _version: u8 = stream.read_value()?;
+                let _uid_size: u8 = stream.read_value()?;
+                let uid: u32 = stream.read_value()?;
+                let _gid_size: u8 = stream.read_value()?;
+                Self::UnixAttrs {
+                    uid,
+                    gid: stream.read_value()?,
+                }
+            }
+            0x000A => {
+                let tag: u16 = stream.read_value()?;
+                if tag != 0x0001 {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "Tag is invalid in NtfsTimestamp",
+                    ));
+                }
+                let size: u16 = stream.read_value()?;
+                if size != 24 {
+                    return Err(Error::new(
+                        ErrorKind::InvalidData,
+                        "Invalid NTFS Timestamps size",
+                    ));
+                }
+                Self::NTFS {
+                    mtime: stream.read_value()?,
+                    atime: stream.read_value()?,
+                    ctime: stream.read_value()?,
+                }
+            }
             _ => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
@@ -322,91 +235,7 @@ impl ValueRead for Extra {
         })
     }
 }
-impl ValueRead for ExtendedTimestamp {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
-        let length: u16 = stream.read_value()?;
-        let flags: u8 = stream.read_value()?;
-        let mut bytes: u16 = 1;
-        let modified_time = if flags & 0x01 != 0 {
-            bytes += 4;
-            Some(stream.read_value()?)
-        } else {
-            None
-        };
-        let access_time = if flags & 0x02 != 0 {
-            if bytes >= length {
-                None
-            } else {
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        let create_time = if flags & 0x04 != 0 {
-            if bytes >= length {
-                None
-            } else {
-                Some(stream.read_value()?)
-            }
-        } else {
-            None
-        };
-        if flags & 0xF8 != 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Flags is invalid in ExtendedTimestamp",
-            ));
-        }
 
-        Ok(Self {
-            modified_time,
-            access_time,
-            create_time,
-        })
-    }
-}
-impl ValueWrite for ExtendedTimestamp {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        let mut length: u16 = 1;
-        let mut flags: u8 = 0x00;
-        if self.modified_time.is_some() {
-            flags |= 0x01;
-            length += 4;
-        }
-        if self.access_time.is_some() {
-            flags |= 0x02;
-            length += 4;
-        }
-        if self.create_time.is_some() {
-            flags |= 0x04;
-            length += 4;
-        }
-        stream.write_value(&length)?;
-        stream.write_value(&flags)?;
-        if let Some(mtime) = &self.modified_time {
-            stream.write_value(mtime)?;
-        }
-        if let Some(atime) = &self.access_time {
-            stream.write_value(atime)?;
-        }
-        if let Some(ctime) = &self.create_time {
-            stream.write_value(ctime)?;
-        }
-        Ok(stream)
-    }
-}
-impl Size for Extra {
-    fn size(&self) -> usize {
-        2 + match self {
-            Extra::ZIP64(z) => z.size(),
-            Extra::ExtendedTimestamp(v) => v.size(),
-            Extra::UnixExtraType(v) => v.size(),
-            Extra::NTFSTimestamp(v) => v.size(),
-        }
-    }
-}
 #[derive(Debug)]
 pub struct ZipFile {
     pub min_version: u16,
@@ -424,7 +253,7 @@ pub struct ZipFile {
     pub data_position: u64,
 }
 impl ValueWrite for ZipFile {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(&Magic::File)?;
@@ -446,10 +275,11 @@ impl ValueWrite for ZipFile {
     }
 }
 impl ZipFile {
-    pub fn size(&self) -> usize {
+    pub fn size(&self, center: bool) -> usize {
         let mut bytes = ZIP_FILE_HEADER_SIZE + self.file_name.as_bytes().len();
         for extra_field in &self.extra_fields {
-            bytes += extra_field.size()
+            //Extra ID length + length + data
+            bytes += 2 + 2 + extra_field.field_size(center) as usize
         }
         bytes
     }
@@ -459,7 +289,7 @@ impl Directory {
         self.compression_method = CompressionType::Store;
         self.compressed_size = 0;
         self.uncompressed_size = stream.length() as u32;
-        self.uncompressed = true;
+        self.compressed = false;
         self.data = Some(stream)
     }
     pub fn decompressed(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
@@ -487,7 +317,7 @@ impl Directory {
 }
 
 impl ValueRead for ZipFile {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::File {
             return Err(Error::new(
@@ -539,7 +369,7 @@ const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u32>() * 2;
 #[derive(Debug)]
 pub struct Directory {
-    pub uncompressed: bool,
+    pub compressed: bool,
     pub data: Option<Stream>,
     pub version: u16,
     pub min_version: u16,
@@ -563,17 +393,17 @@ pub struct Directory {
     pub file: ZipFile,
 }
 impl Directory {
-    pub fn size(&self) -> usize {
+    pub fn size(&self, center: bool) -> usize {
         let mut bytes =
             DIRECTORY_HEADER_SIZE + self.file_name.as_bytes().len() + self.file_comment.len();
         for extra_field in &self.extra_fields {
-            bytes += extra_field.size()
+            bytes += 2 + 2 + extra_field.field_size(center) as usize
         }
         bytes
     }
 }
 impl ValueWrite for Directory {
-    fn write(&self, endian: &Endian) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(&self, endian: &Endian, args: Option<T>) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(&Magic::Directory)?;
@@ -602,7 +432,7 @@ impl ValueWrite for Directory {
     }
 }
 impl ValueRead for Directory {
-    fn read(stream: &mut Stream) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, args: Option<T>) -> std::io::Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
             return Err(Error::new(
@@ -626,7 +456,7 @@ impl ValueRead for Directory {
             data_position: 0,
         };
         let mut info = Self {
-            uncompressed: false,
+            compressed: true,
             data: None,
             version: stream.read_value()?,
             min_version: stream.read_value()?,
@@ -657,7 +487,7 @@ impl ValueRead for Directory {
         if info.extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra = stream.read_value()?; //.read_exact_size(file.extra_field_length as u64)?;
+                let extra_field: Extra = stream.read_value_args(Some(true))?; //.read_exact_size(file.extra_field_length as u64)?;
                 info.extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;
