@@ -3,7 +3,7 @@ use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
-use std::io::{Seek, SeekFrom};
+use std::io::{Result, Seek, SeekFrom};
 
 #[derive(Debug)]
 pub struct EoCd {
@@ -16,7 +16,7 @@ pub struct EoCd {
     pub comment_length: u16,
 }
 impl ValueWrite for EoCd {
-    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
         let mut output = Stream::empty();
         output.with_endian(endian.clone());
         output.write_value(Magic::EoCd)?;
@@ -31,7 +31,7 @@ impl ValueWrite for EoCd {
     }
 }
 impl EoCd {
-    pub fn find_offset(stream: &mut Stream) -> std::io::Result<u64> {
+    pub fn find_offset(stream: &mut Stream) -> Result<u64> {
         let max_eocd_size: u64 = u16::MAX as u64 + 22;
         let mut search_size: u64 = 22; //最快的搜索
         let file_size = stream.length();
@@ -73,7 +73,7 @@ impl EoCd {
 }
 
 impl ValueRead for EoCd {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let eocd_offset = Self::find_offset(stream)?;
         stream.seek(SeekFrom::End(-(eocd_offset as i64)))?;
         stream.seek(SeekFrom::Current(4))?;

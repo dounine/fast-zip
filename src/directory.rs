@@ -1,13 +1,15 @@
 use crate::magic::Magic;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
-use fast_stream::deflate::Deflate;
+use fast_stream::crc32::CRC32;
+use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::derive::NumToEnum;
 use fast_stream::endian::Endian;
 use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
-use fast_stream::stream::Stream;
+use fast_stream::stream::{Data, Stream};
 use std::fmt::Debug;
-use std::io::{Error, ErrorKind, Seek, SeekFrom};
+use std::io::{Error, ErrorKind, Read, Result, Seek, SeekFrom};
+
 pub trait Size {
     fn size(&self) -> usize;
 }
@@ -102,7 +104,7 @@ impl Extra {
     }
 }
 impl ValueWrite for Extra {
-    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(self.header_id())?;
@@ -126,7 +128,7 @@ impl ValueWrite for Extra {
                 ctime,
             } => {
                 let flags = Self::if_present(mtime, 1)
-                    | Self::if_present(atime, 1 << 1)
+                    | Self::if_present(Some(1), 1 << 1)
                     | Self::if_present(ctime, 1 << 2);
                 stream.write_value(flags)?;
                 if let Some(mtime) = mtime {
@@ -153,7 +155,7 @@ impl ValueWrite for Extra {
     }
 }
 impl ValueRead for Extra {
-    fn read_args<T: Sized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, args: &Option<T>) -> Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
             0x5455 => {
@@ -235,7 +237,12 @@ impl ValueRead for Extra {
         })
     }
 }
-
+// #[derive(Debug)]
+// pub struct DataDescriptor {
+//     pub crc32: u32,
+//     pub compressed_size: u32,
+//     pub uncompressed_size: u32,
+// }
 #[derive(Debug)]
 pub struct ZipFile {
     pub min_version: u16,
@@ -253,21 +260,21 @@ pub struct ZipFile {
     pub data_position: u64,
 }
 impl ValueWrite for ZipFile {
-    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value(Magic::File)?;
-        stream.write_value(self.min_version)?;
-        stream.write_value(self.bit_flag)?;
-        stream.write_value(self.compression_method)?;
-        stream.write_value(self.last_modification_time)?;
-        stream.write_value(self.last_modification_date)?;
-        stream.write_value(self.crc_32_uncompressed_data)?;
-        stream.write_value(self.compressed_size)?;
-        stream.write_value(self.uncompressed_size)?;
-        stream.write_value(self.file_name_length)?;
-        stream.write_value(self.extra_field_length)?;
-        stream.write_value(self.file_name)?;
+        stream.write_value_args(Magic::File, args)?;
+        stream.write_value_args(self.min_version, args)?;
+        stream.write_value_args(self.bit_flag, args)?;
+        stream.write_value_args(self.compression_method, args)?;
+        stream.write_value_args(self.last_modification_time, args)?;
+        stream.write_value_args(self.last_modification_date, args)?;
+        stream.write_value_args(self.crc_32_uncompressed_data, args)?;
+        stream.write_value_args(self.compressed_size, args)?;
+        stream.write_value_args(self.uncompressed_size, args)?;
+        stream.write_value_args(self.file_name_length, args)?;
+        stream.write_value_args(self.extra_field_length, args)?;
+        stream.write_value_args(self.file_name, args)?;
         for extra_field in self.extra_fields {
             stream.write_value_args(extra_field, args)?;
         }
@@ -284,19 +291,52 @@ impl ZipFile {
     }
 }
 impl Directory {
-    pub fn set_data(&mut self, stream: Stream) {
-        self.compression_method = CompressionType::Store;
-        self.compressed_size = 0;
+    pub fn exec(&mut self) -> Result<()> {
+        if let Some(data) = self.data.take() {
+            if !self.compressed && self.compression_method == CompressionType::Deflate {
+                self.crc_32_uncompressed_data = data.crc32_value()?;
+                if let Some(file) = &mut self.file {
+                    file.crc_32_uncompressed_data = self.crc_32_uncompressed_data;
+                }
+                let compress_size = data.compress(CompressionLevel::DefaultLevel)?;
+                self.compressed_size = compress_size as u32;
+                self.compressed = true;
+                if let Some(file) = &mut self.file {
+                    file.compressed_size = self.compressed_size;
+                }
+            }
+            data.seek_start()?;
+            self.data = Some(data);
+        }
+        Ok(())
+    }
+    pub fn put_data(&mut self, stream: Stream) {
+        self.compressed_size = stream.length() as u32;
         self.uncompressed_size = stream.length() as u32;
+        if let Some(file) = &mut self.file {
+            file.compressed_size = self.compressed_size;
+            file.uncompressed_size = self.uncompressed_size;
+        }
         self.compressed = false;
         self.data = Some(stream)
     }
-    pub fn decompressed(&mut self, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
+    pub fn put_data_and_compress(&mut self, stream: Stream) -> Result<u64> {
+        self.uncompressed_size = stream.length() as u32;
+        let compress_size = stream.compress(CompressionLevel::DefaultLevel)?;
+        self.compressed_size = compress_size as u32;
+        self.compressed = true;
+        self.data = Some(stream);
+        Ok(compress_size)
+    }
+    pub fn decompressed(&mut self, stream: &mut Stream) -> Result<Vec<u8>> {
         let position = if let Some(file) = &self.file {
             file.data_position
         } else {
             0
         };
+        if let Some(data) = &mut self.data {
+            return Ok(data.copy_data()?);
+        }
         let compressed_data = self.origin_data(position, stream)?;
         let data = if self.compression_method == CompressionType::Deflate {
             let mut data = Stream::new(compressed_data.into());
@@ -307,7 +347,7 @@ impl Directory {
         };
         Ok(data)
     }
-    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> std::io::Result<Vec<u8>> {
+    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Vec<u8>> {
         if let Some(data) = &mut self.data {
             data.seek_start()?;
             data.copy_data()
@@ -319,10 +359,22 @@ impl Directory {
             Ok(data)
         }
     }
+    pub fn take_data(&mut self, position: u64, stream: &mut Stream) -> Result<Vec<u8>> {
+        if let Some(data) = &mut self.data.take() {
+            data.seek_start()?;
+            Ok(data.take_data()?)
+        } else {
+            stream.pin()?;
+            stream.seek(SeekFrom::Start(position))?;
+            let data = stream.read_exact_size(self.compressed_size as u64)?;
+            stream.un_pin()?;
+            Ok(data)
+        }
+    }
 }
 
 impl ValueRead for ZipFile {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::File {
             return Err(Error::new(
@@ -363,6 +415,40 @@ impl ValueRead for ZipFile {
             }
         }
         file.data_position = stream.stream_position()?;
+        // if file.bit_flag & 0x0008 != 0 && file.uncompressed_size == 0 {
+        //     loop {
+        //         let mut buffer = vec![0_u8; 4096];
+        //         let bytes_read = stream.read(&mut buffer)?;
+        //         if bytes_read == 0 {
+        //             return Err(Error::new(
+        //                 ErrorKind::InvalidData,
+        //                 "Data Descriptor Invalid signature",
+        //             ));
+        //         }
+        //         let magic = &[0x50, 0x4B, 0x07, 0x08];
+        //         if let Some(position) = buffer.windows(4).position(|window| window == magic) {
+        //             let remaing_bytes = bytes_read - position;
+        //             if remaing_bytes < 16 {
+        //                 //补充剩下字节
+        //                 let mut remaing = vec![0_u8; 16 - remaing_bytes];
+        //                 let bytes_read = stream.read(&mut remaing)?;
+        //                 if bytes_read != 16 - remaing_bytes {
+        //                     return Err(Error::new(
+        //                         ErrorKind::InvalidData,
+        //                         "Data Descriptor Invalid signature",
+        //                     ));
+        //                 }
+        //                 buffer.extend_from_slice(&remaing);
+        //             }
+        //             let cursor = std::io::Cursor::new(buffer[4 + position..].to_vec());
+        //             let mut data = Stream::new(Data::Mem(cursor));
+        //             file.crc_32_uncompressed_data = data.read_value()?;
+        //             file.compressed_size = data.read_value()?;
+        //             file.uncompressed_size = data.read_value()?;
+        //             break;
+        //         }
+        //     }
+        // }
         Ok(file)
     }
 }
@@ -407,7 +493,7 @@ impl Directory {
     }
 }
 impl ValueWrite for Directory {
-    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> std::io::Result<Stream> {
+    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(Magic::Directory)?;
@@ -436,7 +522,7 @@ impl ValueWrite for Directory {
     }
 }
 impl ValueRead for Directory {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> std::io::Result<Self> {
+    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
             return Err(Error::new(
@@ -503,7 +589,11 @@ impl ValueRead for Directory {
         info.file_comment = stream.read_exact_size(info.file_comment_length as u64)?;
         stream.pin()?;
         stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
-        let file: ZipFile = stream.read_value()?;
+        let mut file: ZipFile = stream.read_value()?;
+        file.bit_flag = 0x01;
+        file.uncompressed_size = info.uncompressed_size;
+        file.compressed_size = info.compressed_size;
+        file.crc_32_uncompressed_data = info.crc_32_uncompressed_data;
         stream.un_pin()?;
         info.file = Some(file);
         Ok(info)
