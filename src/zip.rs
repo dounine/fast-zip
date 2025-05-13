@@ -1,49 +1,63 @@
-use crate::directory::{CompressionType, Directory, Extra, ZipFile};
+use crate::directory::{CompressionType, DataDescriptor, Directory, Extra, ZipFile};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
 use fast_stream::crc32::CRC32;
-use fast_stream::deflate::{CompressionLevel, Deflate};
+use fast_stream::deflate::CompressionLevel;
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
+use indexmap::IndexMap;
 use std::io::{Seek, SeekFrom, Write};
+use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Zip {
     pub stream: Stream,
     pub eo_cd: Option<EoCd>,
-    pub directories: Vec<Directory>,
+    pub compression_level: CompressionLevel,
+    pub directories: IndexMap<String, Directory>,
 }
 impl Zip {
-    pub fn new(stream: Stream) -> Self {
-        Self {
+    pub fn new(stream: Stream) -> Result<Self, ZipError> {
+        // let mut map = IndexMap::new();
+        // map.insert("a", 1); // 保持插入顺序
+        // map.insert("b", 2);
+        let mut info = Self {
             stream,
             eo_cd: None,
-            directories: vec![],
-        }
+            compression_level: CompressionLevel::DefaultLevel,
+            directories: IndexMap::new(),
+        };
+        info.parse()?;
+        Ok(info)
+    }
+    pub fn with_compression_level(&mut self, compression_level: CompressionLevel) {
+        self.compression_level = compression_level
     }
     pub fn parse(&mut self) -> Result<(), ZipError> {
         let eo_cd = self.stream.read_value::<EoCd>()?;
         self.stream.seek(SeekFrom::Start(eo_cd.offset as u64))?;
-        let mut directories = vec![];
+        let mut directories = IndexMap::new();
         for _ in 0..eo_cd.entries {
             let dir: Directory = self.stream.read_value()?;
-            directories.push(dir);
+            directories.insert(dir.file_name.clone(), dir);
         }
         self.directories = directories;
         self.eo_cd = Some(eo_cd);
 
         Ok(())
     }
+
+    #[allow(dead_code)]
     fn add_directory(&mut self, file_name: &str) -> Result<(), ZipError> {
-        // self.directories.retain(|v| v.file_name != file_name);
+        // self.directories.retain(|v| file_name != file_name);
         let file_name_length = file_name.as_bytes().len() as u16;
         let mut directory = Directory {
             compressed: true,
             data: None,
             version: 798,
             min_version: 10,
-            bit_flag: 0,
+            flags: 0,
             compression_method: CompressionType::Store,
             last_modification_time: 0,
             last_modification_date: 0,
@@ -69,8 +83,8 @@ impl Zip {
             file_comment: vec![],
             file: Some(ZipFile {
                 min_version: 10,
-                bit_flag: 0,
-                compression_method: CompressionType::Deflate,
+                flags: 0,
+                compression_method: CompressionType::Store,
                 last_modification_time: 0,
                 last_modification_date: 0,
                 crc_32_uncompressed_data: 0,
@@ -87,6 +101,7 @@ impl Zip {
                     },
                     Extra::UnixAttrs { uid: 503, gid: 20 },
                 ],
+                data_descriptor: None,
                 data_position: 0,
             }),
         };
@@ -102,46 +117,57 @@ impl Zip {
             }
             file.extra_field_length = extra_field_length;
         }
-        self.directories.push(directory);
+        self.directories
+            .insert(directory.file_name.clone(), directory);
         Ok(())
     }
-
-    pub fn add_file_and_compress(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
-        let folders: Vec<&str> = file_name.split("/").collect();
-        if folders.len() > 1 {
-            // 一层一层创建文件夹
-            let folders: Vec<String> = folders
-                .iter()
-                .take(folders.len() - 1)
-                .scan(vec![], |acc, &ext| {
-                    acc.push(ext);
-                    Some(acc.join("/"))
-                })
-                .collect();
-            let dirs: Vec<String> = self
-                .directories
-                .iter()
-                .filter(|v| v.file_name.ends_with("/"))
-                .map(|v| v.file_name.clone())
-                .collect();
-            for folder in folders {
-                let path = format!("{}/", folder);
-                if dirs.iter().find(|&v| *v == path).is_none() {
-                    self.add_directory(&path)?;
-                }
-            }
+    pub fn save_file(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
+        if let Some(dir) = self.directories.get_mut(file_name) {
+            dir.put_data(data);
+            return Ok(());
         }
-        self.directories.retain(|v| v.file_name != file_name);
+        self.add_file(data, file_name)
+    }
+    pub fn remove_file(&mut self, file_name: &str) {
+        self.directories.swap_remove(file_name);
+        // self.directories.retain(|v| v.file_name != file_name);
+    }
+    pub fn add_file(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
+        // let folders: Vec<&str> = file_name.split("/").collect();
+        // if folders.len() > 1 {
+        //     // 一层一层创建文件夹
+        //     let folders: Vec<String> = folders
+        //         .iter()
+        //         .take(folders.len() - 1)
+        //         .scan(vec![], |acc, &ext| {
+        //             acc.push(ext);
+        //             Some(acc.join("/"))
+        //         })
+        //         .collect();
+        //     let dirs: Vec<String> = self
+        //         .directories
+        //         .iter()
+        //         .filter(|v| v.file_name.ends_with("/"))
+        //         .map(|v| v.file_name.clone())
+        //         .collect();
+        //     for folder in folders {
+        //         let path = format!("{}/", folder);
+        //         if dirs.iter().find(|&v| *v == path).is_none() {
+        //             self.add_directory(&path)?;
+        //         }
+        //     }
+        // }
+        // self.directories.retain(|v| v.file_name != file_name);
         let file_name_length = file_name.as_bytes().len() as u16;
         let uncompressed_size = data.length() as u32;
         let crc_32_uncompressed_data = data.crc32_value()?;
-        let compressed_size = data.compress(CompressionLevel::DefaultLevel)? as u32;
+        let compressed_size = uncompressed_size; //data.compress(CompressionLevel::DefaultLevel)? as u32;
         let mut directory = Directory {
-            compressed: true,
+            compressed: false,
             data: Some(data),
             version: 798,
             min_version: 20,
-            bit_flag: 0,
+            flags: 0x08,
             compression_method: CompressionType::Deflate,
             last_modification_time: 0,
             last_modification_date: 0,
@@ -167,12 +193,12 @@ impl Zip {
             file_comment: vec![],
             file: Some(ZipFile {
                 min_version: 20,
-                bit_flag: 0,
+                flags: 0x08,
                 compression_method: CompressionType::Deflate,
                 last_modification_time: 0,
                 last_modification_date: 0,
-                crc_32_uncompressed_data,
-                compressed_size,
+                crc_32_uncompressed_data: 0,
+                compressed_size: 0,
                 uncompressed_size,
                 file_name_length,
                 extra_field_length: 0,
@@ -185,6 +211,11 @@ impl Zip {
                     },
                     Extra::UnixAttrs { uid: 503, gid: 20 },
                 ],
+                data_descriptor: Some(DataDescriptor {
+                    crc32: crc_32_uncompressed_data,
+                    compressed_size,
+                    uncompressed_size,
+                }),
                 data_position: 0,
             }),
         };
@@ -200,17 +231,18 @@ impl Zip {
             }
             file.extra_field_length = extra_field_length;
         }
-        self.directories.push(directory);
+        self.directories
+            .insert(directory.file_name.clone(), directory);
         Ok(())
     }
     fn computer(&mut self) -> Result<(), ZipError> {
         let mut files_size = 0;
         let mut directors_size = 0;
-        self.directories
-            .sort_by(|a, b| a.file_name.cmp(&b.file_name));
-        for director in &mut self.directories {
+        // self.directories
+        //     .sort_by(|a, b| a.file_name.cmp(&b.file_name));
+        for (_, director) in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
-            director.exec()?;
+            director.exec(&self.compression_level)?;
             if let Some(file) = &mut director.file {
                 files_size += file.size(false) + director.compressed_size as usize;
             }
@@ -224,35 +256,36 @@ impl Zip {
         Ok(())
     }
     pub fn get_mut(&mut self, file_name: &str) -> Option<&mut Directory> {
-        self.directories
-            .iter_mut()
-            .find(|e| e.file_name == file_name)
+        self.directories.get_mut(file_name)
+        // self.directories
+        //     .iter_mut()
+        //     .find(|e| e.file_name == file_name)
     }
     pub fn get(&mut self, file_name: &str) -> Option<&Directory> {
-        self.directories.iter().find(|e| e.file_name == file_name)
+        self.directories.get(file_name)
+        // self.directories.iter().find(|e| e.file_name == file_name)
     }
     pub fn write(&mut self, output: &mut Stream) -> Result<(), ZipError> {
         let endian = Endian::Little;
+        let time = Instant::now();
         self.computer()?;
-        let mut count = 0;
-        for director in &mut self.directories {
-            count += 1;
+        println!("computer time {:?}", time.elapsed());
+        for (_, director) in &mut self.directories {
             if let Some(file) = director.file.take() {
-                println!("{}", director.file_name);
+                let mut file = file;
                 let position = file.data_position;
                 let mut data = director.take_data(position, &mut self.stream)?;
+                let data_descriptor_data = file.data_descriptor.take();
                 let stream = file.write(&endian)?;
                 output.merge(stream)?;
-                // if count <= 1 {
-                    output.write(&mut data)?;
-                // }
+                output.write(&mut data)?;
+                if let Some(data_descriptor) = data_descriptor_data {
+                    output.write_value(data_descriptor)?;
+                }
             }
-            // if count >= 1 {
-            //     break;
-            // }
         }
         let directories = std::mem::take(&mut self.directories);
-        for director in directories {
+        for (_, director) in directories {
             let data = director.write_args(&endian, &Some(true))?;
             output.merge(data)?;
         }

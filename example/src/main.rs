@@ -5,10 +5,10 @@ use std::fs;
 fn main() {
     let data = fs::read("./data/iphone.ipa").unwrap();
     let stream = Stream::new(data.into());
-    let mut zip = Zip::new(stream);
-    zip.parse().unwrap();
+    let mut zip = Zip::new(stream).unwrap();
+    // zip.parse().unwrap();
 
-    for dir in &mut zip.directories {
+    for (_, dir) in &mut zip.directories {
         println!("dir: {}", dir.file_name);
         if dir.file_name == "Payload/" {
             //"Payload/FKCamera Full.app/embedded.mobileprovision" {

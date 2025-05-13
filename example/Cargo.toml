@@ -2,7 +2,8 @@
 name = "example"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [dependencies]
-fast-zip = { path = ".." }
 fast-stream = { path = "/Users/lake/dounine/github/ipa/fast-stream", features = ["all"] }
+fast-zip = { path = "..", features = ["all"] }

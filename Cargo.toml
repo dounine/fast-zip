@@ -8,16 +8,11 @@ exclude = ["example"]
 [workspace]
 members = ["example", "."]
 
-[dependencies.fast-stream]
-path = "../fast-stream"
-
 [features]
-default = ["crc32", "deflate"]
+default = []
 all = ["fast-stream/all"]
-file = ["fast-stream/file"]
-enum = ["fast-stream/enum"]
-deflate = ["fast-stream/deflate"]
-crc32 = ["fast-stream/crc32"]
 
 [dependencies]
 thiserror = "2.0"
+indexmap = "2.8.0"
+fast-stream = { path = "../fast-stream" }
