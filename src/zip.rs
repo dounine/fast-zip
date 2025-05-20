@@ -8,7 +8,6 @@ use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 use indexmap::IndexMap;
 use std::io::{Seek, SeekFrom, Write};
-use std::time::Instant;
 
 #[derive(Debug)]
 pub struct Zip {
@@ -267,9 +266,7 @@ impl Zip {
     }
     pub fn write(&mut self, output: &mut Stream) -> Result<(), ZipError> {
         let endian = Endian::Little;
-        let time = Instant::now();
         self.computer()?;
-        println!("computer time {:?}", time.elapsed());
         for (_, director) in &mut self.directories {
             if let Some(file) = director.file.take() {
                 let mut file = file;

@@ -366,6 +366,33 @@ impl Directory {
         self.data = Some(stream);
         Ok(compress_size)
     }
+    pub fn decompressed_callback(
+        &mut self,
+        stream: &mut Stream,
+        callback_fun: &mut impl FnMut(usize),
+    ) -> Result<Vec<u8>> {
+        let position = if let Some(file) = &self.file {
+            file.data_position
+        } else {
+            0
+        };
+        if let Some(data) = &mut self.data {
+            data.seek_start()?;
+            if self.compressed {
+                data.decompress_callback(callback_fun)?;
+            }
+            return Ok(data.copy_data()?);
+        }
+        let compressed_data = self.origin_data(position, stream)?;
+        let data = if self.compression_method == CompressionType::Deflate {
+            let mut data = Stream::new(compressed_data.into());
+            data.decompress_callback(callback_fun)?;
+            data.take_data()?
+        } else {
+            compressed_data
+        };
+        Ok(data)
+    }
     pub fn decompressed(&mut self, stream: &mut Stream) -> Result<Vec<u8>> {
         let position = if let Some(file) = &self.file {
             file.data_position
