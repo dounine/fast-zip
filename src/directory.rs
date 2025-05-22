@@ -370,7 +370,7 @@ impl Directory {
         &mut self,
         stream: &mut Stream,
         callback_fun: &mut impl FnMut(usize),
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Stream> {
         let position = if let Some(file) = &self.file {
             file.data_position
         } else {
@@ -380,20 +380,21 @@ impl Directory {
             data.seek_start()?;
             if self.compressed {
                 data.decompress_callback(callback_fun)?;
+                self.compressed = false;
             }
-            return Ok(data.copy_data()?);
+            return Ok(data.clone()?);
         }
-        let compressed_data = self.origin_data(position, stream)?;
-        let data = if self.compression_method == CompressionType::Deflate {
-            let mut data = Stream::new(compressed_data.into());
-            data.decompress_callback(callback_fun)?;
-            data.take_data()?
-        } else {
-            compressed_data
-        };
-        Ok(data)
+        let mut compressed_data = self.origin_data(position, stream)?;
+        if self.compression_method == CompressionType::Deflate {
+            compressed_data.decompress_callback(callback_fun)?;
+            let data = compressed_data.clone()?;
+            self.data = Some(compressed_data);
+            compressed_data = data;
+        }
+        self.compressed = false;
+        Ok(compressed_data)
     }
-    pub fn decompressed(&mut self, stream: &mut Stream) -> Result<Vec<u8>> {
+    pub fn decompressed(&mut self, stream: &mut Stream) -> Result<Stream> {
         let position = if let Some(file) = &self.file {
             file.data_position
         } else {
@@ -402,28 +403,29 @@ impl Directory {
         if let Some(data) = &mut self.data {
             data.seek_start()?;
             if self.compressed {
+                self.compressed = false;
                 data.decompress()?;
             }
-            return Ok(data.copy_data()?);
+            return Ok(data.clone()?);
         }
         let compressed_data = self.origin_data(position, stream)?;
         let data = if self.compression_method == CompressionType::Deflate {
-            let mut data = Stream::new(compressed_data.into());
-            data.decompress()?;
-            data.take_data()?
+            compressed_data.decompress()?;
+            self.compressed = false;
+            compressed_data
         } else {
             compressed_data
         };
         Ok(data)
     }
-    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Vec<u8>> {
+    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
         if let Some(data) = &mut self.data {
             data.seek_start()?;
-            data.copy_data()
+            data.clone()
         } else {
             stream.pin()?;
             stream.seek(SeekFrom::Start(position))?;
-            let data = stream.read_exact_size(self.compressed_size as u64)?;
+            let data = stream.copy_size(self.compressed_size as usize)?;
             stream.un_pin()?;
             Ok(data)
         }
@@ -553,6 +555,13 @@ pub struct Directory {
     pub file: Option<ZipFile>,
 }
 impl Directory {
+    pub fn compressed(&self) -> bool {
+        if let Some(data) = &self.data {
+            return self.compressed;
+        } else {
+            self.compression_method == CompressionType::Deflate
+        }
+    }
     pub fn size(&self, center: bool) -> usize {
         let mut bytes =
             DIRECTORY_HEADER_SIZE + self.file_name.as_bytes().len() + self.file_comment.len();
@@ -628,6 +637,7 @@ impl ValueRead for Directory {
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
         info.file_name = file_name;
+        info.compressed = info.compression_method == CompressionType::Deflate;
         let mut total_bytes = 0;
         if info.extra_field_length > 0 {
             loop {
