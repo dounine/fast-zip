@@ -9,7 +9,6 @@ fn main() {
     // zip.parse().unwrap();
 
     for (_, dir) in &mut zip.directories {
-        println!("dir: {}", dir.file_name);
         if dir.file_name == "Payload/" {
             //"Payload/FKCamera Full.app/embedded.mobileprovision" {
             let mp_content_bytes: &[u8] = include_bytes!("../../data/iphone2.mobileprovision");
@@ -24,7 +23,10 @@ fn main() {
     // zip.add_file_and_compress(data, "hi/hello.txt").unwrap();
 
     let mut output = Stream::new(vec![].into());
-    zip.write(&mut output).unwrap();
+    zip.write(&mut output, &mut |total, size, format| {
+        println!("write {}", format)
+    })
+    .unwrap();
 
     fs::write("./data/copy.zip", output.take_data().unwrap()).unwrap();
 }

@@ -234,14 +234,21 @@ impl Zip {
             .insert(directory.file_name.clone(), directory);
         Ok(())
     }
-    fn computer(&mut self) -> Result<(), ZipError> {
+    fn computer_un_compress_size(&mut self) -> usize {
+        let mut total_size = 0;
+        for (_, director) in &mut self.directories {
+            total_size += director.exec_un_compress_size();
+        }
+        total_size
+    }
+    fn computer(&mut self, callback: &mut impl FnMut(usize)) -> Result<(), ZipError> {
         let mut files_size = 0;
         let mut directors_size = 0;
         // self.directories
         //     .sort_by(|a, b| a.file_name.cmp(&b.file_name));
         for (_, director) in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
-            director.exec(&self.compression_level)?;
+            director.exec(&self.compression_level, callback)?;
             if let Some(file) = &mut director.file {
                 files_size += file.size(false) + director.compressed_size as usize;
             }
@@ -264,17 +271,38 @@ impl Zip {
         self.directories.get(file_name)
         // self.directories.iter().find(|e| e.file_name == file_name)
     }
-    pub fn write(&mut self, output: &mut Stream) -> Result<(), ZipError> {
+    fn create_adapter<T: FnMut(usize, usize, String)>(
+        total: usize,
+        sum: &mut usize,
+        mut f: T,
+    ) -> impl FnMut(usize) + use<'_, T> {
+        move |x| {
+            *sum += x;
+            f(
+                total,
+                *sum,
+                format!("{:.2}%", (*sum as f64 / total as f64) * 100.0),
+            )
+        }
+    }
+    pub fn write(
+        &mut self,
+        output: &mut Stream,
+        callback: &mut impl FnMut(usize, usize, String),
+    ) -> Result<(), ZipError> {
         let endian = Endian::Little;
-        self.computer()?;
+        let total_size = self.computer_un_compress_size();
+        let mut binding = 0;
+        let mut callback = Self::create_adapter(total_size, &mut binding, callback);
+        self.computer(&mut callback)?;
         for (_, director) in &mut self.directories {
             if let Some(file) = director.file.take() {
                 let mut file = file;
                 let position = file.data_position;
                 let mut data = director.take_data(position, &mut self.stream)?;
                 let data_descriptor_data = file.data_descriptor.take();
-                let stream = file.write(&endian)?;
-                output.merge(stream)?;
+                let mut stream = file.write(&endian)?;
+                output.append(&mut stream)?;
                 output.write(&mut data)?;
                 if let Some(data_descriptor) = data_descriptor_data {
                     output.write_value(data_descriptor)?;

@@ -9,6 +9,7 @@ use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use std::fmt::Debug;
 use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
+use std::time::Instant;
 
 pub trait Size {
     fn size(&self) -> usize;
@@ -325,14 +326,27 @@ impl ZipFile {
     }
 }
 impl Directory {
-    pub fn exec(&mut self, compression_level: &CompressionLevel) -> Result<()> {
-        if let Some(data) = self.data.take() {
+    pub fn exec_un_compress_size(&mut self) -> usize {
+        if let Some(data) = &self.data {
+            if !self.compressed && self.compression_method == CompressionType::Deflate {
+                return data.length() as usize;
+            }
+        }
+        0
+    }
+    pub fn exec(
+        &mut self,
+        compression_level: &CompressionLevel,
+        callback: &mut impl FnMut(usize),
+    ) -> Result<()> {
+        if let Some(mut data) = self.data.take() {
             if !self.compressed && self.compression_method == CompressionType::Deflate {
                 self.crc_32_uncompressed_data = data.crc32_value()?;
                 if let Some(file) = &mut self.file {
                     file.crc_32_uncompressed_data = self.crc_32_uncompressed_data;
                 }
-                let compress_size = data.compress(compression_level)?;
+                data.seek_start()?;
+                let compress_size = data.compress_callback(compression_level, callback)?;
                 self.compressed_size = compress_size as u32;
                 self.compressed = true;
                 if let Some(file) = &mut self.file {
@@ -403,20 +417,20 @@ impl Directory {
         if let Some(data) = &mut self.data {
             data.seek_start()?;
             if self.compressed {
-                self.compressed = false;
                 data.decompress()?;
+                self.compressed = false;
             }
             return Ok(data.clone()?);
         }
-        let compressed_data = self.origin_data(position, stream)?;
-        let data = if self.compression_method == CompressionType::Deflate {
+        let mut compressed_data = self.origin_data(position, stream)?;
+        if self.compression_method == CompressionType::Deflate {
             compressed_data.decompress()?;
-            self.compressed = false;
-            compressed_data
-        } else {
-            compressed_data
-        };
-        Ok(data)
+            let data = compressed_data.clone()?;
+            self.data = Some(compressed_data);
+            compressed_data = data;
+        }
+        self.compressed = false;
+        Ok(compressed_data)
     }
     pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
         if let Some(data) = &mut self.data {
