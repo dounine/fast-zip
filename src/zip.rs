@@ -302,6 +302,7 @@ impl Zip {
                 let mut data = director.take_data(position, &mut self.stream)?;
                 let data_descriptor_data = file.data_descriptor.take();
                 let mut stream = file.write(&endian)?;
+                stream.seek_start()?;
                 output.append(&mut stream)?;
                 output.write(&mut data)?;
                 if let Some(data_descriptor) = data_descriptor_data {
