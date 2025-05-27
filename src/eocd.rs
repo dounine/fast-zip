@@ -5,7 +5,7 @@ use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use std::io::{Result, Seek, SeekFrom};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EoCd {
     pub number_of_disk: u16,
     pub directory_starts: u16,

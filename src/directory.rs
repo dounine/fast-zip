@@ -9,7 +9,6 @@ use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use std::fmt::Debug;
 use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
-use std::time::Instant;
 
 pub trait Size {
     fn size(&self) -> usize;
@@ -44,7 +43,7 @@ const ZIP_FILE_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u32>() * 3
     + size_of::<u16>() * 2;
 //https://libzip.org/specifications/extrafld.txt
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Extra {
     NTFS {
         mtime: u64,
@@ -245,7 +244,7 @@ impl ValueRead for Extra {
         })
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DataDescriptor {
     pub crc32: u32,
     pub compressed_size: u32,
@@ -269,7 +268,7 @@ impl ValueWrite for DataDescriptor {
         Ok(stream)
     }
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ZipFile {
     pub min_version: u16,
     pub flags: u16,
@@ -327,135 +326,123 @@ impl ZipFile {
 }
 impl Directory {
     pub fn exec_un_compress_size(&mut self) -> usize {
-        if let Some(data) = &self.data {
-            if !self.compressed && self.compression_method == CompressionType::Deflate {
-                return data.length() as usize;
-            }
+        if !self.compressed && self.compression_method == CompressionType::Deflate {
+            self.data.length() as usize
+        } else {
+            0
         }
-        0
     }
     pub fn exec(
         &mut self,
         compression_level: &CompressionLevel,
         callback: &mut impl FnMut(usize),
     ) -> Result<()> {
-        if let Some(mut data) = self.data.take() {
-            if !self.compressed && self.compression_method == CompressionType::Deflate {
-                self.crc_32_uncompressed_data = data.crc32_value()?;
-                if let Some(file) = &mut self.file {
-                    file.crc_32_uncompressed_data = self.crc_32_uncompressed_data;
-                }
-                data.seek_start()?;
-                let compress_size = data.compress_callback(compression_level, callback)?;
-                self.compressed_size = compress_size as u32;
-                self.compressed = true;
-                if let Some(file) = &mut self.file {
-                    file.compressed_size = self.compressed_size;
-                }
-            }
-            data.seek_start()?;
-            self.data = Some(data);
+        if !self.compressed && self.compression_method == CompressionType::Deflate {
+            self.crc_32_uncompressed_data = self.data.crc32_value()?;
+            self.file.crc_32_uncompressed_data = self.crc_32_uncompressed_data;
+            self.data.seek_start()?;
+            let compress_size = self.data.compress_callback(compression_level, callback)?;
+            self.compressed_size = compress_size as u32;
+            self.compressed = true;
+            self.file.compressed_size = self.compressed_size;
+            return Ok(());
         }
+        self.data.seek_start()?;
         Ok(())
     }
     pub fn put_data(&mut self, stream: Stream) {
         self.compressed_size = stream.length() as u32;
         self.uncompressed_size = stream.length() as u32;
-        if let Some(file) = &mut self.file {
-            file.compressed_size = self.compressed_size;
-            file.uncompressed_size = self.uncompressed_size;
-        }
+        // if let Some(file) = &mut self.file {
+        self.file.compressed_size = self.compressed_size;
+        self.file.uncompressed_size = self.uncompressed_size;
+        // }
         self.compressed = false;
-        self.data = Some(stream)
+        self.data = stream
     }
-    pub fn put_data_and_compress(
-        &mut self,
-        stream: Stream,
-        compression_level: &CompressionLevel,
-    ) -> Result<u64> {
-        self.uncompressed_size = stream.length() as u32;
-        let compress_size = stream.compress(compression_level)?;
-        self.compressed_size = compress_size as u32;
-        self.compressed = true;
-        self.data = Some(stream);
-        Ok(compress_size)
-    }
+    // pub fn put_data_and_compress(
+    //     &mut self,
+    //     stream: Stream,
+    //     compression_level: &CompressionLevel,
+    // ) -> Result<u64> {
+    //     self.uncompressed_size = stream.length() as u32;
+    //     let compress_size = stream.compress(compression_level)?;
+    //     self.compressed_size = compress_size as u32;
+    //     self.compressed = true;
+    //     self.data = stream;
+    //     Ok(compress_size)
+    // }
     pub fn decompressed_callback(
         &mut self,
-        stream: &mut Stream,
         callback_fun: &mut impl FnMut(usize),
-    ) -> Result<Stream> {
-        let position = if let Some(file) = &self.file {
-            file.data_position
-        } else {
-            0
-        };
-        if let Some(data) = &mut self.data {
-            data.seek_start()?;
-            if self.compressed {
-                data.decompress_callback(callback_fun)?;
-                self.compressed = false;
-            }
-            return Ok(data.clone()?);
+    ) -> Result<&mut Stream> {
+        // let position = if let Some(file) = &self.file {
+        //     file.data_position
+        // } else {
+        //     0
+        // };
+        self.data.seek_start()?;
+        if self.compressed {
+            self.data.decompress_callback(callback_fun)?;
+            self.compressed = false;
         }
-        let mut compressed_data = self.origin_data(position, stream)?;
-        if self.compression_method == CompressionType::Deflate {
-            compressed_data.decompress_callback(callback_fun)?;
-            let data = compressed_data.clone()?;
-            self.data = Some(compressed_data);
-            compressed_data = data;
-        }
-        self.compressed = false;
-        Ok(compressed_data)
+        Ok(&mut self.data)
+        // let mut compressed_data = self.origin_data(position, stream)?;
+        // if self.compression_method == CompressionType::Deflate {
+        //     compressed_data.decompress_callback(callback_fun)?;
+        //     let data = compressed_data.clone()?;
+        //     self.data = Some(compressed_data);
+        //     compressed_data = data;
+        // }
+        // self.compressed = false;
+        // Ok(compressed_data)
     }
-    pub fn decompressed(&mut self, stream: &mut Stream) -> Result<Stream> {
-        let position = if let Some(file) = &self.file {
-            file.data_position
-        } else {
-            0
-        };
-        if let Some(data) = &mut self.data {
-            data.seek_start()?;
-            if self.compressed {
-                data.decompress()?;
-                self.compressed = false;
-            }
-            return Ok(data.clone()?);
+    pub fn decompressed(&mut self) -> Result<&mut Stream> {
+        // let position = if let Some(file) = &self.file {
+        //     file.data_position
+        // } else {
+        //     0
+        // };
+        self.data.seek_start()?;
+        if self.compressed {
+            self.data.decompress()?;
+            self.compressed = false;
         }
-        let mut compressed_data = self.origin_data(position, stream)?;
-        if self.compression_method == CompressionType::Deflate {
-            compressed_data.decompress()?;
-            let data = compressed_data.clone()?;
-            self.data = Some(compressed_data);
-            compressed_data = data;
-        }
-        self.compressed = false;
-        Ok(compressed_data)
+        Ok(&mut self.data)
+        // let mut compressed_data = self.origin_data(position, stream)?;
+        // if self.compression_method == CompressionType::Deflate {
+        //     compressed_data.decompress()?;
+        //     let data = compressed_data.clone()?;
+        //     self.data = Some(compressed_data);
+        //     compressed_data = data;
+        // }
+        // self.compressed = false;
+        // Ok(compressed_data)
     }
-    pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
-        if let Some(data) = &mut self.data {
-            data.seek_start()?;
-            data.clone()
-        } else {
-            stream.pin()?;
-            stream.seek(SeekFrom::Start(position))?;
-            let data = stream.copy_size(self.compressed_size as usize)?;
-            stream.un_pin()?;
-            Ok(data)
-        }
-    }
-    pub fn take_data(&mut self, position: u64, stream: &mut Stream) -> Result<Vec<u8>> {
-        if let Some(data) = &mut self.data.take() {
-            data.seek_start()?;
-            Ok(data.take_data()?)
-        } else {
-            stream.pin()?;
-            stream.seek(SeekFrom::Start(position))?;
-            let data = stream.read_exact_size(self.compressed_size as u64)?;
-            stream.un_pin()?;
-            Ok(data)
-        }
-    }
+    // pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
+    //     // if let Some(data) = &mut self.data {
+    //         self.data.seek_start()?;
+    //         self.data.clone()
+    //     // } else {
+    //     //     stream.pin()?;
+    //     //     stream.seek(SeekFrom::Start(position))?;
+    //     //     let data = stream.copy_size(self.compressed_size as usize)?;
+    //     //     stream.un_pin()?;
+    //     //     Ok(data)
+    //     // }
+    // }
+    // pub fn take_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
+    //     if let Some(data) = &mut self.data.take() {
+    //         data.seek_start()?;
+    //         data.clone()
+    //     } else {
+    //         stream.pin()?;
+    //         stream.seek(SeekFrom::Start(position))?;
+    //         let data = stream.read_exact_size(self.compressed_size as u64)?;
+    //         stream.un_pin()?;
+    //         Ok(data.into())
+    //     }
+    // }
 }
 
 impl ValueRead for ZipFile {
@@ -543,10 +530,10 @@ const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u32>() * 3
     + size_of::<u16>() * 5
     + size_of::<u32>() * 2;
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Directory {
     pub compressed: bool,
-    pub data: Option<Stream>,
+    pub data: Stream,
     pub version: u16,
     pub min_version: u16,
     pub flags: u16,
@@ -566,15 +553,39 @@ pub struct Directory {
     pub file_name: String,
     pub extra_fields: Vec<Extra>,
     pub file_comment: Vec<u8>,
-    pub file: Option<ZipFile>,
+    pub file: ZipFile,
+}
+impl Directory {
+    pub fn clone_not_stream(&self) -> Self {
+        Directory {
+            compressed: self.compressed,
+            data: Stream::empty(),
+            version: self.version,
+            min_version: self.min_version,
+            flags: self.flags,
+            compression_method: self.compression_method.clone(),
+            last_modification_time: self.last_modification_time,
+            last_modification_date: self.last_modification_date,
+            crc_32_uncompressed_data: self.crc_32_uncompressed_data,
+            compressed_size: self.compressed_size,
+            uncompressed_size: self.uncompressed_size,
+            file_name_length: self.file_name_length,
+            extra_field_length: self.extra_field_length,
+            file_comment_length: self.file_comment_length,
+            number_of_starts: self.number_of_starts,
+            internal_file_attributes: self.internal_file_attributes,
+            external_file_attributes: self.external_file_attributes,
+            offset_of_local_file_header: self.offset_of_local_file_header,
+            file_name: self.file_name.clone(),
+            extra_fields: self.extra_fields.clone(),
+            file_comment: self.file_comment.clone(),
+            file: self.file.clone(),
+        }
+    }
 }
 impl Directory {
     pub fn compressed(&self) -> bool {
-        if let Some(data) = &self.data {
-            return self.compressed;
-        } else {
-            self.compression_method == CompressionType::Deflate
-        }
+        self.compressed
     }
     pub fn size(&self, center: bool) -> usize {
         let mut bytes =
@@ -623,64 +634,128 @@ impl ValueRead for Directory {
                 "Invalid directory magic number",
             ));
         }
-        let mut info = Self {
-            compressed: true,
-            data: None,
-            version: stream.read_value()?,
-            min_version: stream.read_value()?,
-            flags: stream.read_value()?,
-            compression_method: stream.read_value()?,
-            last_modification_time: stream.read_value()?,
-            last_modification_date: stream.read_value()?,
-            crc_32_uncompressed_data: stream.read_value()?,
-            compressed_size: stream.read_value()?,
-            uncompressed_size: stream.read_value()?,
-            file_name_length: stream.read_value()?,
-            extra_field_length: stream.read_value()?,
-            file_comment_length: stream.read_value()?,
-            number_of_starts: stream.read_value()?,
-            internal_file_attributes: stream.read_value()?,
-            external_file_attributes: stream.read_value()?,
-            offset_of_local_file_header: stream.read_value()?,
-            file_name: "".to_string(),
-            extra_fields: vec![],
-            file_comment: vec![],
-            file: None,
-        };
-        let file_name = stream.read_exact_size(info.file_name_length as u64)?;
+        let version: u16 = stream.read_value()?;
+        let min_version: u16 = stream.read_value()?;
+        let flags: u16 = stream.read_value()?;
+        let compression_method: CompressionType = stream.read_value()?;
+        let last_modification_time: u16 = stream.read_value()?;
+        let last_modification_date: u16 = stream.read_value()?;
+        let crc_32_uncompressed_data: u32 = stream.read_value()?;
+        let compressed_size: u32 = stream.read_value()?;
+        let uncompressed_size: u32 = stream.read_value()?;
+        let file_name_length: u16 = stream.read_value()?;
+        let extra_field_length: u16 = stream.read_value()?;
+        let file_comment_length: u16 = stream.read_value()?;
+        let number_of_starts: u16 = stream.read_value()?;
+        let internal_file_attributes: u16 = stream.read_value()?;
+        let external_file_attributes: u32 = stream.read_value()?;
+        let offset_of_local_file_header: u32 = stream.read_value()?;
+        let mut extra_fields: Vec<Extra> = Vec::new();
+        // let file_name: String = "".to_string();
+        // let version: stream.read_value()?;
+        // let min_version: stream.read_value()?;
+        // let flags: stream.read_value()?;
+        // let compression_method: stream.read_value()?;
+        // let last_modification_time: stream.read_value()?;
+        // let last_modification_date: stream.read_value()?;
+        // let crc_32_uncompressed_data: stream.read_value()?;
+        // let compressed_size: stream.read_value()?;
+        // let uncompressed_size: stream.read_value()?;
+        // let file_name_length: stream.read_value()?;
+        // let extra_field_length: stream.read_value()?;
+        // let  file_comment_length: stream.read_value()?;
+        // let number_of_starts: stream.read_value()?;
+        // let internal_file_attributes: stream.read_value()?;
+        // let external_file_attributes: stream.read_value()?;
+        // let offset_of_local_file_header: stream.read_value()?;
+        // let file_name: "".to_string();
+        // let mut info = Self {
+        //     compressed: true,
+        //     data: None,
+        //     version: stream.read_value()?,
+        //     min_version: stream.read_value()?,
+        //     flags: stream.read_value()?,
+        //     compression_method: stream.read_value()?,
+        //     last_modification_time: stream.read_value()?,
+        //     last_modification_date: stream.read_value()?,
+        //     crc_32_uncompressed_data: stream.read_value()?,
+        //     compressed_size: stream.read_value()?,
+        //     uncompressed_size: stream.read_value()?,
+        //     file_name_length: stream.read_value()?,
+        //     extra_field_length: stream.read_value()?,
+        //     file_comment_length: stream.read_value()?,
+        //     number_of_starts: stream.read_value()?,
+        //     internal_file_attributes: stream.read_value()?,
+        //     external_file_attributes: stream.read_value()?,
+        //     offset_of_local_file_header: stream.read_value()?,
+        //     file_name: "".to_string(),
+        //     extra_fields: vec![],
+        //     file_comment: vec![],
+        //     file: None,
+        // };
+        let file_name = stream.read_exact_size(file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-        info.file_name = file_name;
-        info.compressed = info.compression_method == CompressionType::Deflate;
+        // info.file_name = file_name;
+        let compressed = compression_method == CompressionType::Deflate;
         let mut total_bytes = 0;
-        if info.extra_field_length > 0 {
+        if extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
                 let extra_field: Extra = stream.read_value_args(&Some(true))?; //.read_exact_size(file.extra_field_length as u64)?;
-                info.extra_fields.push(extra_field);
+                extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;
-                if total_bytes >= info.extra_field_length as u64 {
+                if total_bytes >= extra_field_length as u64 {
                     break;
                 }
             }
         }
-        info.file_comment = stream.read_exact_size(info.file_comment_length as u64)?;
+        let file_comment = stream.read_exact_size(file_comment_length as u64)?;
         stream.pin()?;
-        stream.seek(SeekFrom::Start(info.offset_of_local_file_header as u64))?;
+        stream.seek(SeekFrom::Start(offset_of_local_file_header as u64))?;
         let mut file: ZipFile = stream.read_value()?;
         if file.flags & 0x0008 != 0 {
             file.data_descriptor = Some(DataDescriptor {
-                crc32: info.crc_32_uncompressed_data,
-                compressed_size: info.compressed_size,
-                uncompressed_size: info.uncompressed_size,
+                crc32: crc_32_uncompressed_data,
+                compressed_size,
+                uncompressed_size,
             })
         }
+        // stream.pin()?;
+        stream.seek(SeekFrom::Start(file.data_position))?;
+        let data_bytes = stream.read_exact_size(compressed_size as u64)?;
+        let mut data: Stream = stream.copy_empty()?;
+        data.write_all(&data_bytes)?;
+        // stream.un_pin()?;
         // file.uncompressed_size = info.uncompressed_size;
         // file.compressed_size = info.compressed_size;
         // file.crc_32_uncompressed_data = info.crc_32_uncompressed_data;
         stream.un_pin()?;
-        info.file = Some(file);
-        Ok(info)
+        // info.file = Some(file);
+        Ok(Self {
+            compressed,
+            data,
+            version,
+            min_version,
+            flags,
+            compression_method,
+            last_modification_time,
+            last_modification_date,
+            crc_32_uncompressed_data,
+            compressed_size,
+            uncompressed_size,
+            file_name_length,
+            extra_field_length,
+            file_comment_length,
+            number_of_starts,
+            internal_file_attributes,
+            external_file_attributes,
+            offset_of_local_file_header,
+            file_name,
+            extra_fields,
+            file_comment,
+            file,
+        })
     }
 }
