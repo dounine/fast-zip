@@ -5,10 +5,9 @@ use fast_stream::bytes::{Bytes, ValueWrite};
 use fast_stream::crc32::CRC32;
 use fast_stream::deflate::CompressionLevel;
 use fast_stream::endian::Endian;
+use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use indexmap::IndexMap;
-use std::io::{Seek, SeekFrom};
-use fast_stream::pin::Pin;
 
 #[derive(Debug, Clone)]
 pub struct Zip {
@@ -276,14 +275,13 @@ impl Zip {
                 data.seek_start()?;
                 header_stream.append(&mut data)?;
             }
-            header_stream.seek_start()?;
-            output.append(&mut header_stream)?;
         } else {
             for (_, director) in &mut self.directories {
-                let file = director.file.clone();
-                let mut data_descriptor = file.data_descriptor.clone();
+                let mut file = director.file.clone();
+                let mut data_descriptor = file.data_descriptor.take();
                 let mut data = &mut director.data;
                 let stream = file.write(&endian)?;
+                director.file.data_descriptor = data_descriptor.clone();
                 output.merge(stream)?;
                 data.seek_start()?;
                 output.append(&mut data)?;
@@ -297,6 +295,8 @@ impl Zip {
                 header_stream.append(&mut data)?;
             }
         }
+        header_stream.seek_start()?;
+        output.append(&mut header_stream)?;
         let mut eo_cd = if self.write_clear {
             self.eo_cd.take()
         } else {
