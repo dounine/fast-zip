@@ -1,6 +1,5 @@
 use crate::magic::Magic;
 use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
-use fast_stream::crc32::CRC32;
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::derive::NumToEnum;
 use fast_stream::endian::Endian;
@@ -334,12 +333,19 @@ impl Directory {
     }
     pub fn exec(
         &mut self,
+        crc32_computer: bool,
         compression_level: &CompressionLevel,
         callback: &mut impl FnMut(usize),
     ) -> Result<()> {
         if !self.compressed && self.compression_method == CompressionType::Deflate {
-            self.crc_32_uncompressed_data = self.data.crc32_value()?;
-            self.file.crc_32_uncompressed_data = self.crc_32_uncompressed_data;
+            let crc_32_uncompressed_data = if crc32_computer {
+                self.data.hash_computer()?;
+                self.data.crc32_value()
+            } else {
+                0
+            };
+            self.crc_32_uncompressed_data = crc_32_uncompressed_data; //crc32 设置为0也能安装，网页可以忽略计算加快速度
+            self.file.crc_32_uncompressed_data = crc_32_uncompressed_data;
             self.data.seek_start()?;
             let compress_size = self.data.compress_callback(compression_level, callback)?;
             self.compressed_size = compress_size as u32;
@@ -376,73 +382,21 @@ impl Directory {
         &mut self,
         callback_fun: &mut impl FnMut(usize),
     ) -> Result<&mut Stream> {
-        // let position = if let Some(file) = &self.file {
-        //     file.data_position
-        // } else {
-        //     0
-        // };
         self.data.seek_start()?;
         if self.compressed {
             self.data.decompress_callback(callback_fun)?;
             self.compressed = false;
         }
         Ok(&mut self.data)
-        // let mut compressed_data = self.origin_data(position, stream)?;
-        // if self.compression_method == CompressionType::Deflate {
-        //     compressed_data.decompress_callback(callback_fun)?;
-        //     let data = compressed_data.clone()?;
-        //     self.data = Some(compressed_data);
-        //     compressed_data = data;
-        // }
-        // self.compressed = false;
-        // Ok(compressed_data)
     }
     pub fn decompressed(&mut self) -> Result<&mut Stream> {
-        // let position = if let Some(file) = &self.file {
-        //     file.data_position
-        // } else {
-        //     0
-        // };
         self.data.seek_start()?;
         if self.compressed {
             self.data.decompress()?;
             self.compressed = false;
         }
         Ok(&mut self.data)
-        // let mut compressed_data = self.origin_data(position, stream)?;
-        // if self.compression_method == CompressionType::Deflate {
-        //     compressed_data.decompress()?;
-        //     let data = compressed_data.clone()?;
-        //     self.data = Some(compressed_data);
-        //     compressed_data = data;
-        // }
-        // self.compressed = false;
-        // Ok(compressed_data)
     }
-    // pub fn origin_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
-    //     // if let Some(data) = &mut self.data {
-    //         self.data.seek_start()?;
-    //         self.data.clone()
-    //     // } else {
-    //     //     stream.pin()?;
-    //     //     stream.seek(SeekFrom::Start(position))?;
-    //     //     let data = stream.copy_size(self.compressed_size as usize)?;
-    //     //     stream.un_pin()?;
-    //     //     Ok(data)
-    //     // }
-    // }
-    // pub fn take_data(&mut self, position: u64, stream: &mut Stream) -> Result<Stream> {
-    //     if let Some(data) = &mut self.data.take() {
-    //         data.seek_start()?;
-    //         data.clone()
-    //     } else {
-    //         stream.pin()?;
-    //         stream.seek(SeekFrom::Start(position))?;
-    //         let data = stream.read_exact_size(self.compressed_size as u64)?;
-    //         stream.un_pin()?;
-    //         Ok(data.into())
-    //     }
-    // }
 }
 
 impl ValueRead for ZipFile {

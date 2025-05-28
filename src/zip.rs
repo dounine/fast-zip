@@ -2,7 +2,6 @@ use crate::directory::{CompressionType, DataDescriptor, Directory, Extra, ZipFil
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use fast_stream::bytes::{Bytes, ValueWrite};
-use fast_stream::crc32::CRC32;
 use fast_stream::deflate::CompressionLevel;
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
@@ -13,12 +12,16 @@ use indexmap::IndexMap;
 pub struct Zip {
     pub stream: Option<Stream>,
     stream_size: usize,
+    crc32_computer: bool,
     pub eo_cd: Option<EoCd>,
     pub write_clear: bool,
     pub compression_level: CompressionLevel,
     pub directories: IndexMap<String, Directory>,
 }
 impl Zip {
+    pub fn with_crc32(&mut self, value: bool) {
+        self.crc32_computer = value;
+    }
     pub fn size(&self) -> usize {
         self.stream_size
     }
@@ -28,6 +31,7 @@ impl Zip {
             stream: Some(stream),
             eo_cd: None,
             write_clear: true,
+            crc32_computer: true,
             compression_level: CompressionLevel::DefaultLevel,
             directories: IndexMap::new(),
         };
@@ -136,7 +140,7 @@ impl Zip {
     pub fn add_file(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
         let file_name_length = file_name.as_bytes().len() as u16;
         let uncompressed_size = data.length() as u32;
-        let crc_32_uncompressed_data = data.crc32_value()?;
+        let crc_32_uncompressed_data = 0; //data.crc32_value();
         let compressed_size = uncompressed_size; //data.compress(CompressionLevel::DefaultLevel)? as u32;
         let mut directory = Directory {
             compressed: false,
@@ -223,7 +227,7 @@ impl Zip {
         //     .sort_keys();
         for (_, director) in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
-            director.exec(&self.compression_level, callback)?;
+            director.exec(self.crc32_computer, &self.compression_level, callback)?;
             files_size += director.file.size(false) + director.compressed_size as usize;
             directors_size += director.size(true);
         }
@@ -264,8 +268,9 @@ impl Zip {
                 let mut file = director.file.clone();
                 let mut data_descriptor = file.data_descriptor.take();
                 let mut data = &mut director.data;
-                let stream = file.write(&endian)?;
-                output.merge(stream)?;
+                let mut stream = file.write(&endian)?;
+                stream.seek_start()?;
+                output.append(&mut stream)?;
                 data.seek_start()?;
                 output.append(&mut data)?;
                 if let Some(data_descriptor) = data_descriptor.take() {
@@ -280,9 +285,10 @@ impl Zip {
                 let mut file = director.file.clone();
                 let mut data_descriptor = file.data_descriptor.take();
                 let mut data = &mut director.data;
-                let stream = file.write(&endian)?;
+                let mut stream = file.write(&endian)?;
                 director.file.data_descriptor = data_descriptor.clone();
-                output.merge(stream)?;
+                stream.seek_start()?;
+                output.append(&mut stream)?;
                 data.seek_start()?;
                 output.append(&mut data)?;
                 if let Some(data_descriptor) = data_descriptor.take() {
@@ -307,8 +313,9 @@ impl Zip {
             }
         };
         if let Some(eo_cd) = eo_cd.take() {
-            let data = eo_cd.write(&endian)?;
-            output.merge(data)?;
+            let mut data = eo_cd.write(&endian)?;
+            data.seek_start()?;
+            output.append(&mut data)?;
         }
         Ok(())
     }
