@@ -339,6 +339,7 @@ impl Directory {
     ) -> Result<()> {
         if !self.compressed && self.compression_method == CompressionType::Deflate {
             let crc_32_uncompressed_data = if crc32_computer {
+                self.data.init_crc32();
                 self.data.hash_computer()?;
                 self.data.crc32_value()
             } else {
