@@ -157,6 +157,32 @@ impl ValueRead for Extra {
     fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
+            0x5855 => {
+                let mut length: u16 = stream.read_value()?;
+                let mtime = if length > 0 {
+                    length -= 4;
+                    Some(stream.read_value()?)
+                } else {
+                    None
+                };
+                let atime = if length > 0 {
+                    length -= 4;
+                    Some(stream.read_value()?)
+                } else {
+                    None
+                };
+                let ctime = if length > 0 {
+                    length -= 4;
+                    Some(stream.read_value()?)
+                } else {
+                    None
+                };
+                Self::UnixExtendedTimestamp {
+                    mtime,
+                    atime,
+                    ctime,
+                }
+            }
             0x5455 => {
                 let mut length: u16 = stream.read_value()?;
                 length -= 1;
