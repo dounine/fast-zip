@@ -158,21 +158,21 @@ impl ValueRead for Extra {
         let id: u16 = stream.read_value()?;
         Ok(match id {
             0x5855 => {
-                let mut length: u16 = stream.read_value()?;
-                let mtime = if length > 0 {
-                    length -= 4;
+                let mut _length: u16 = stream.read_value()?;
+                let mtime = if _length > 0 {
+                    _length -= 4;
                     Some(stream.read_value()?)
                 } else {
                     None
                 };
-                let atime = if length > 0 {
-                    length -= 4;
+                let atime = if _length > 0 {
+                    _length -= 4;
                     Some(stream.read_value()?)
                 } else {
                     None
                 };
-                let ctime = if length > 0 {
-                    length -= 4;
+                let ctime = if _length > 0 {
+                    _length -= 4;
                     Some(stream.read_value()?)
                 } else {
                     None
