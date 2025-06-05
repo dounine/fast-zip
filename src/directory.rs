@@ -240,7 +240,11 @@ impl ValueRead for Extra {
                 }
             }
             0x000A => {
+                let mut length: u16 = stream.read_value()?;
+                let reserved: u32 = stream.read_value()?;
+                length -= 4;
                 let tag: u16 = stream.read_value()?;
+                length -= 2;
                 if tag != 0x0001 {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
@@ -248,16 +252,35 @@ impl ValueRead for Extra {
                     ));
                 }
                 let size: u16 = stream.read_value()?;
+                length -= 2;
                 if size != 24 {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
                         "Invalid NTFS Timestamps size",
                     ));
                 }
+                let mtime: u64 = if length > 0 {
+                    length -= 8;
+                    stream.read_value::<u64>()?
+                } else {
+                    0
+                };
+                let atime: u64 = if length > 0 {
+                    length -= 8;
+                    stream.read_value::<u64>()?
+                } else {
+                    0
+                };
+                let ctime: u64 = if length > 0 {
+                    length -= 8;
+                    stream.read_value::<u64>()?
+                } else {
+                    0
+                };
                 Self::NTFS {
-                    mtime: stream.read_value()?,
-                    atime: stream.read_value()?,
-                    ctime: stream.read_value()?,
+                    mtime,
+                    atime,
+                    ctime,
                 }
             }
             _ => {
