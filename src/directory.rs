@@ -114,9 +114,9 @@ impl ValueWrite for Extra {
                 atime,
                 ctime,
             } => {
-                stream.write_value(0_u32)?;
-                stream.write_value(1_u16)?;
-                stream.write_value(24_u16)?;
+                stream.write_value(0_u32)?; //reserved
+                stream.write_value(1_u16)?; //Tag1
+                stream.write_value(24_u16)?; //Size1
                 stream.write_value(mtime)?;
                 stream.write_value(atime)?;
                 stream.write_value(ctime)?;
