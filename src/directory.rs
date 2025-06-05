@@ -107,7 +107,8 @@ impl ValueWrite for Extra {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(self.header_id())?;
-        stream.write_value(self.field_size(args.is_some()))?;
+        let size = self.field_size(args.is_some());
+        stream.write_value(size)?;
         match self {
             Extra::NTFS {
                 mtime,
@@ -241,7 +242,7 @@ impl ValueRead for Extra {
             }
             0x000A => {
                 let mut length: u16 = stream.read_value()?;
-                let reserved: u32 = stream.read_value()?;
+                let _reserved: u32 = stream.read_value()?;
                 length -= 4;
                 let tag: u16 = stream.read_value()?;
                 length -= 2;
