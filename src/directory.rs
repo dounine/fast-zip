@@ -241,11 +241,11 @@ impl ValueRead for Extra {
                 }
             }
             0x000A => {
-                let mut length: u16 = stream.read_value()?;
+                let mut _length: u16 = stream.read_value()?;
                 let _reserved: u32 = stream.read_value()?;
-                length -= 4;
+                _length -= 4;
                 let tag: u16 = stream.read_value()?;
-                length -= 2;
+                _length -= 2;
                 if tag != 0x0001 {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
@@ -253,27 +253,27 @@ impl ValueRead for Extra {
                     ));
                 }
                 let size: u16 = stream.read_value()?;
-                length -= 2;
+                _length -= 2;
                 if size != 24 {
                     return Err(Error::new(
                         ErrorKind::InvalidData,
                         "Invalid NTFS Timestamps size",
                     ));
                 }
-                let mtime: u64 = if length > 0 {
-                    length -= 8;
+                let mtime: u64 = if _length > 0 {
+                    _length -= 8;
                     stream.read_value::<u64>()?
                 } else {
                     0
                 };
-                let atime: u64 = if length > 0 {
-                    length -= 8;
+                let atime: u64 = if _length > 0 {
+                    _length -= 8;
                     stream.read_value::<u64>()?
                 } else {
                     0
                 };
-                let ctime: u64 = if length > 0 {
-                    length -= 8;
+                let ctime: u64 = if _length > 0 {
+                    _length -= 8;
                     stream.read_value::<u64>()?
                 } else {
                     0
@@ -561,6 +561,32 @@ pub struct Directory {
     pub file: ZipFile,
 }
 impl Directory {
+    pub fn clone_all(&mut self) -> Result<Self> {
+        Ok(Directory {
+            compressed: self.compressed,
+            data: self.data.clone_stream()?,
+            version: self.version,
+            min_version: self.min_version,
+            flags: self.flags,
+            compression_method: self.compression_method.clone(),
+            last_modification_time: self.last_modification_time,
+            last_modification_date: self.last_modification_date,
+            crc_32_uncompressed_data: self.crc_32_uncompressed_data,
+            compressed_size: self.compressed_size,
+            uncompressed_size: self.uncompressed_size,
+            file_name_length: self.file_name_length,
+            extra_field_length: self.extra_field_length,
+            file_comment_length: self.file_comment_length,
+            number_of_starts: self.number_of_starts,
+            internal_file_attributes: self.internal_file_attributes,
+            external_file_attributes: self.external_file_attributes,
+            offset_of_local_file_header: self.offset_of_local_file_header,
+            file_name: self.file_name.clone(),
+            extra_fields: self.extra_fields.clone(),
+            file_comment: self.file_comment.clone(),
+            file: self.file.clone(),
+        })
+    }
     pub fn clone_not_stream(&self) -> Self {
         Directory {
             compressed: self.compressed,

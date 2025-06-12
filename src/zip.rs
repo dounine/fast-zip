@@ -7,11 +7,13 @@ use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
 use indexmap::IndexMap;
+use std::cmp::min;
+use std::io::Read;
 
 #[derive(Debug, Clone)]
 pub struct Zip {
-    pub stream: Option<Stream>,
     stream_size: usize,
+    pub stream: Option<Stream>,
     crc32_computer: bool,
     pub eo_cd: Option<EoCd>,
     pub write_clear: bool,
@@ -19,11 +21,30 @@ pub struct Zip {
     pub directories: IndexMap<String, Directory>,
 }
 impl Zip {
+    pub fn size(&self) -> usize {
+        self.stream_size
+    }
     pub fn with_crc32(&mut self, value: bool) {
         self.crc32_computer = value;
     }
-    pub fn size(&self) -> usize {
-        self.stream_size
+    pub fn create(stream: Stream) -> Zip {
+        Zip {
+            stream_size: stream.length() as usize,
+            stream: Some(stream),
+            crc32_computer: false,
+            eo_cd: Some(EoCd {
+                number_of_disk: 0,
+                directory_starts: 0,
+                number_of_directory_disk: 0,
+                entries: 0,
+                size: 0,
+                offset: 0,
+                comment_length: 0,
+            }),
+            write_clear: true,
+            compression_level: CompressionLevel::DefaultLevel,
+            directories: Default::default(),
+        }
     }
     pub fn new(stream: Stream) -> Result<Self, ZipError> {
         let mut info = Self {
@@ -57,7 +78,7 @@ impl Zip {
     }
 
     #[allow(dead_code)]
-    fn add_directory(&mut self, file_name: &str) -> Result<(), ZipError> {
+    pub fn add_folder(&mut self, file_name: &str) -> Result<(), ZipError> {
         let file_name_length = file_name.as_bytes().len() as u16;
         let mut directory = Directory {
             compressed: true,
@@ -66,8 +87,8 @@ impl Zip {
             min_version: 10,
             flags: 0,
             compression_method: CompressionType::Store,
-            last_modification_time: 0,
-            last_modification_date: 0,
+            last_modification_time: 39620,
+            last_modification_date: 23170,
             crc_32_uncompressed_data: 0,
             compressed_size: 0,
             uncompressed_size: 0,
@@ -76,7 +97,7 @@ impl Zip {
             file_comment_length: 0,
             number_of_starts: 0,
             internal_file_attributes: 0,
-            external_file_attributes: 1106051088,
+            external_file_attributes: 0x41ED0010,
             offset_of_local_file_header: 0,
             file_name: file_name.to_string(),
             extra_fields: vec![
@@ -92,8 +113,8 @@ impl Zip {
                 min_version: 10,
                 flags: 0,
                 compression_method: CompressionType::Store,
-                last_modification_time: 0,
-                last_modification_date: 0,
+                last_modification_time: 39620,
+                last_modification_date: 23170,
                 crc_32_uncompressed_data: 0,
                 compressed_size: 0,
                 uncompressed_size: 0,
@@ -137,11 +158,55 @@ impl Zip {
         }
         self.add_file(data, file_name)
     }
-    pub fn add_file(&mut self, data: Stream, file_name: &str) -> Result<(), ZipError> {
+    pub fn add_directory(&mut self, mut dir: Directory) {
+        if dir.file_name != dir.file.file_name {
+            dir.file.file_name = dir.file_name.clone();
+        }
+        // if dir.compression_method == CompressionType::Deflate {
+        //     dir.version = 798;
+        //     dir.min_version = 20;
+        //     dir.flags = 0x08;
+        //     dir.internal_file_attributes = 1;
+        //     dir.external_file_attributes = 2175008768;
+        //     dir.file.crc_32_uncompressed_data = 0;
+        //     dir.file.compressed_size = 0;
+        //     dir.file.flags = dir.flags;
+        //     dir.file.min_version = dir.version;
+        //     dir.file.data_descriptor = Some(DataDescriptor {
+        //         crc32: dir.crc_32_uncompressed_data,
+        //         compressed_size: dir.compressed_size,
+        //         uncompressed_size: dir.uncompressed_size,
+        //     });
+        // }
+        self.directories.insert(dir.file_name.clone(), dir);
+    }
+    fn is_binary(data: &[u8]) -> bool {
+        let bin_threshold = 0.3;
+        // 定义文本字符范围：可打印 ASCII 字符 + 常见控制符
+        let text_chars: Vec<u8> = (0x20..=0x7E) // 可打印 ASCII (空格到 ~)
+            .chain(vec![b'\n', b'\r', b'\t', b'\x0B']) // 换行、回车、制表符等
+            .collect();
+
+        // 统计非文本字符数量
+        let non_text_count = data
+            .iter()
+            .filter(|byte| !text_chars.contains(byte))
+            .count();
+        // 计算非文本字符占比
+        let ratio = non_text_count as f32 / data.len() as f32;
+        ratio > bin_threshold
+    }
+    pub fn add_file(&mut self, mut data: Stream, file_name: &str) -> Result<(), ZipError> {
         let file_name_length = file_name.as_bytes().len() as u16;
         let uncompressed_size = data.length() as u32;
         let crc_32_uncompressed_data = 0; //data.crc32_value();
         let compressed_size = uncompressed_size; //data.compress(CompressionLevel::DefaultLevel)? as u32;
+
+        let mut buffer = vec![0u8; min(compressed_size as usize, 1024)];
+        data.read_exact(&mut buffer)?;
+        data.seek_start()?;
+        let internal_file_attributes = if Self::is_binary(&buffer) { 0 } else { 1 };
+
         let mut directory = Directory {
             compressed: false,
             data,
@@ -149,8 +214,8 @@ impl Zip {
             min_version: 20,
             flags: 0x08,
             compression_method: CompressionType::Deflate,
-            last_modification_time: 0,
-            last_modification_date: 0,
+            last_modification_time: 39620,
+            last_modification_date: 23170,
             crc_32_uncompressed_data,
             compressed_size,
             uncompressed_size,
@@ -158,7 +223,7 @@ impl Zip {
             extra_field_length: 0,
             file_comment_length: 0,
             number_of_starts: 0,
-            internal_file_attributes: 1,
+            internal_file_attributes,
             external_file_attributes: 2175008768,
             offset_of_local_file_header: 0,
             file_name: file_name.to_string(),
@@ -175,8 +240,8 @@ impl Zip {
                 min_version: 20,
                 flags: 0x08,
                 compression_method: CompressionType::Deflate,
-                last_modification_time: 0,
-                last_modification_date: 0,
+                last_modification_time: 39620,
+                last_modification_date: 23170,
                 crc_32_uncompressed_data: 0,
                 compressed_size: 0,
                 uncompressed_size,
@@ -228,12 +293,15 @@ impl Zip {
         for (_, director) in &mut self.directories {
             director.offset_of_local_file_header = files_size as u32;
             director.exec(self.crc32_computer, &self.compression_level, callback)?;
+            director.file_name_length = director.file_name.len() as u16;
+            director.file.file_name_length = director.file_name_length;
             files_size += director.file.size(false) + director.compressed_size as usize;
             directors_size += director.size(true);
         }
         if let Some(eo_cd) = &mut self.eo_cd {
             eo_cd.size = directors_size as u32;
             eo_cd.entries = self.directories.len() as u16;
+            eo_cd.number_of_directory_disk = eo_cd.entries;
             eo_cd.offset = files_size as u32;
         }
         Ok(false)
