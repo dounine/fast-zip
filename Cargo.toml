@@ -15,4 +15,4 @@ all = ["fast-stream/all"]
 [dependencies]
 thiserror = "2.0"
 indexmap = "2.8.0"
-fast-stream = { path = "../fast-stream" }
+fast-stream = { git = "https://github.com/dounine/fast-stream" }
