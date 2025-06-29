@@ -1,9 +1,11 @@
 [package]
 name = "example"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [dependencies]
-fast-stream = { path = "/Users/lake/dounine/github/ipa/fast-stream", features = ["all"] }
+fast-stream = { git = "https://github.com/dounine/fast-stream", features = ["all"] }
 fast-zip = { path = "..", features = ["all"] }
+serde = "1.0.219"
+plist = "1.7.2"
