@@ -349,7 +349,7 @@ impl ValueWrite for ZipFile {
         stream.write_value_args(self.uncompressed_size, args)?;
         stream.write_value_args(self.file_name_length, args)?;
         stream.write_value_args(self.extra_field_length, args)?;
-        stream.write_value_args(self.file_name, args)?;
+        stream.write_value_args(self.file_name.as_bytes().to_vec(), args)?;
         for extra_field in self.extra_fields {
             stream.write_value_args(extra_field, args)?;
         }
@@ -648,7 +648,7 @@ impl ValueWrite for Directory {
         stream.write_value(self.internal_file_attributes)?;
         stream.write_value(self.external_file_attributes)?;
         stream.write_value(self.offset_of_local_file_header)?;
-        stream.write_value(self.file_name)?;
+        stream.write_value(self.file_name.as_bytes().to_vec())?;
         for extra_field in self.extra_fields {
             stream.write_value(extra_field)?;
         }
