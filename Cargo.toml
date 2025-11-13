@@ -9,10 +9,13 @@ exclude = ["example"]
 members = ["example", "."]
 
 [features]
-default = []
+default = ["fast-stream"]
 all = ["fast-stream/all"]
 
 [dependencies]
 thiserror = "2.0"
 indexmap = "2.10.0"
-fast-stream = { git = "https://github.com/dounine/fast-stream" }
+#fast-stream = { git = "https://github.com/dounine/fast-stream" }
+[dependencies.fast-stream]
+path = "../fast-stream"
+optional = true

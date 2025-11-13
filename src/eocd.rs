@@ -1,4 +1,5 @@
 use crate::magic::Magic;
+use crate::zip::Parser;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
@@ -6,7 +7,8 @@ use fast_stream::stream::Stream;
 use std::io::{Result, Seek, SeekFrom};
 
 #[derive(Debug, Clone)]
-pub struct EoCd {
+pub struct EoCd<TYPE> {
+    pub r#type: TYPE,
     pub number_of_disk: u16,
     pub directory_starts: u16,
     pub number_of_directory_disk: u16,
@@ -15,7 +17,8 @@ pub struct EoCd {
     pub offset: u32,
     pub comment_length: u16,
 }
-impl ValueWrite for EoCd {
+
+impl ValueWrite for EoCd<Parser> {
     fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
         let mut output = Stream::empty();
         output.with_endian(endian.clone());
@@ -30,7 +33,7 @@ impl ValueWrite for EoCd {
         Ok(output)
     }
 }
-impl EoCd {
+impl EoCd<Parser> {
     pub fn find_offset(stream: &mut Stream) -> Result<u64> {
         let max_eocd_size: u64 = u16::MAX as u64 + 22;
         let mut search_size: u64 = 22; //最快的搜索
@@ -72,13 +75,14 @@ impl EoCd {
     }
 }
 
-impl ValueRead for EoCd {
+impl ValueRead for EoCd<Parser> {
     fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let eocd_offset = Self::find_offset(stream)?;
         stream.seek(SeekFrom::End(-(eocd_offset as i64)))?;
         stream.seek(SeekFrom::Current(4))?;
 
         Ok(EoCd {
+            r#type: Parser,
             number_of_disk: stream.read_value()?,
             directory_starts: stream.read_value()?,
             number_of_directory_disk: stream.read_value()?,

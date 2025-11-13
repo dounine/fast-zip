@@ -1,5 +1,8 @@
+use crate::extra::{Center, Extra};
 use crate::magic::Magic;
-use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
+use crate::zip::Parser;
+use crate::zip_file::{DataDescriptor, ZipFile};
+use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::derive::NumToEnum;
 use fast_stream::endian::Endian;
@@ -35,345 +38,7 @@ impl CompressionType {
     }
 }
 enum_to_bytes!(CompressionType, u16);
-const ZIP_FILE_HEADER_SIZE: usize = Magic::byte_size()
-    + size_of::<u16>() * 2
-    + CompressionType::byte_size()
-    + size_of::<u16>() * 2
-    + size_of::<u32>() * 3
-    + size_of::<u16>() * 2;
-//https://libzip.org/specifications/extrafld.txt
-#[derive(Debug, Clone)]
-pub enum Extra {
-    NTFS {
-        mtime: u64,
-        atime: u64,
-        ctime: u64,
-    },
-    UnixExtendedTimestamp {
-        mtime: Option<i32>,
-        atime: Option<i32>,
-        ctime: Option<i32>,
-    },
-    UnixAttrs {
-        uid: u32,
-        gid: u32,
-    },
-}
-impl Extra {
-    pub fn optional_field_size<T: Sized>(field: &Option<T>) -> u16 {
-        match field {
-            None => 0,
-            Some(_) => size_of::<T>() as u16,
-        }
-    }
-    pub fn size(&self, center: bool) -> u16 {
-        2 + 2 + self.field_size(center)
-    }
-    pub fn field_size(&self, center: bool) -> u16 {
-        match self {
-            Extra::NTFS { .. } => 32,
-            Extra::UnixExtendedTimestamp {
-                mtime,
-                atime,
-                ctime,
-            } => {
-                1 + Self::optional_field_size(mtime) + {
-                    if !center {
-                        Self::optional_field_size(atime) + Self::optional_field_size(ctime)
-                    } else {
-                        0
-                    }
-                }
-            }
-            Extra::UnixAttrs { .. } => 11,
-        }
-    }
-    pub fn header_id(&self) -> u16 {
-        match self {
-            Extra::NTFS { .. } => 0x000a,
-            Extra::UnixExtendedTimestamp { .. } => 0x5455,
-            Extra::UnixAttrs { .. } => 0x7875,
-        }
-    }
-    pub fn if_present(val: Option<i32>, if_present: u8) -> u8 {
-        match val {
-            Some(_) => if_present,
-            None => 0,
-        }
-    }
-}
-impl ValueWrite for Extra {
-    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        stream.write_value(self.header_id())?;
-        let size = self.field_size(args.is_some());
-        stream.write_value(size)?;
-        match self {
-            Extra::NTFS {
-                mtime,
-                atime,
-                ctime,
-            } => {
-                stream.write_value(0_u32)?; //reserved
-                stream.write_value(1_u16)?; //Tag1
-                stream.write_value(24_u16)?; //Size1
-                stream.write_value(mtime)?;
-                stream.write_value(atime)?;
-                stream.write_value(ctime)?;
-            }
-            Extra::UnixExtendedTimestamp {
-                mtime,
-                atime,
-                ctime,
-            } => {
-                let flags = Self::if_present(mtime, 1)
-                    | Self::if_present(Some(1), 1 << 1)
-                    | Self::if_present(ctime, 1 << 2);
-                stream.write_value(flags)?;
-                if let Some(mtime) = mtime {
-                    stream.write_value(mtime)?;
-                }
-                if !args.is_some() {
-                    if let Some(atime) = atime {
-                        stream.write_value(atime)?;
-                    }
-                    if let Some(ctime) = ctime {
-                        stream.write_value(ctime)?;
-                    }
-                }
-            }
-            Extra::UnixAttrs { uid, gid, .. } => {
-                stream.write_value(1_u8)?;
-                stream.write_value(4_u8)?;
-                stream.write_value(uid)?;
-                stream.write_value(4_u8)?;
-                stream.write_value(gid)?;
-            }
-        }
-        Ok(stream)
-    }
-}
-impl ValueRead for Extra {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
-        let id: u16 = stream.read_value()?;
-        Ok(match id {
-            0x5855 => {
-                let mut _length: u16 = stream.read_value()?;
-                let mtime = if _length > 0 {
-                    _length -= 4;
-                    Some(stream.read_value()?)
-                } else {
-                    None
-                };
-                let atime = if _length > 0 {
-                    _length -= 4;
-                    Some(stream.read_value()?)
-                } else {
-                    None
-                };
-                let ctime = if _length > 0 {
-                    _length -= 4;
-                    Some(stream.read_value()?)
-                } else {
-                    None
-                };
-                Self::UnixExtendedTimestamp {
-                    mtime,
-                    atime,
-                    ctime,
-                }
-            }
-            0x5455 => {
-                let mut length: u16 = stream.read_value()?;
-                length -= 1;
-                let flags: u8 = stream.read_value()?;
-                let mtime = if flags & 0x01 != 0 {
-                    length -= 4;
-                    Some(stream.read_value()?)
-                } else {
-                    None
-                };
-                let atime = if flags & 0x02 != 0 {
-                    if length == 0 {
-                        None
-                    } else {
-                        length -= 4;
-                        Some(stream.read_value()?)
-                    }
-                } else {
-                    None
-                };
-                let ctime = if flags & 0x04 != 0 {
-                    if length == 0 {
-                        None
-                    } else {
-                        length -= 4;
-                        Some(stream.read_value()?)
-                    }
-                } else {
-                    None
-                };
-                if length > 0 {
-                    stream.read_value::<u32>()?;
-                }
-                if flags & 0xF8 != 0 {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Flags is invalid in ExtendedTimestamp",
-                    ));
-                }
-                Self::UnixExtendedTimestamp {
-                    mtime,
-                    atime,
-                    ctime,
-                }
-            }
-            0x7875 => {
-                let _length: u16 = stream.read_value()?;
-                let _version: u8 = stream.read_value()?;
-                let _uid_size: u8 = stream.read_value()?;
-                let uid: u32 = stream.read_value()?;
-                let _gid_size: u8 = stream.read_value()?;
-                Self::UnixAttrs {
-                    uid,
-                    gid: stream.read_value()?,
-                }
-            }
-            0x000A => {
-                let mut _length: u16 = stream.read_value()?;
-                let _reserved: u32 = stream.read_value()?;
-                _length -= 4;
-                let tag: u16 = stream.read_value()?;
-                _length -= 2;
-                if tag != 0x0001 {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Tag is invalid in NtfsTimestamp",
-                    ));
-                }
-                let size: u16 = stream.read_value()?;
-                _length -= 2;
-                if size != 24 {
-                    return Err(Error::new(
-                        ErrorKind::InvalidData,
-                        "Invalid NTFS Timestamps size",
-                    ));
-                }
-                let mtime: u64 = if _length > 0 {
-                    _length -= 8;
-                    stream.read_value::<u64>()?
-                } else {
-                    0
-                };
-                let atime: u64 = if _length > 0 {
-                    _length -= 8;
-                    stream.read_value::<u64>()?
-                } else {
-                    0
-                };
-                let ctime: u64 = if _length > 0 {
-                    _length -= 8;
-                    stream.read_value::<u64>()?
-                } else {
-                    0
-                };
-                Self::NTFS {
-                    mtime,
-                    atime,
-                    ctime,
-                }
-            }
-            _ => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Extra id {} not match", id),
-                ));
-            }
-        })
-    }
-}
-#[derive(Debug, Clone)]
-pub struct DataDescriptor {
-    pub crc32: u32,
-    pub compressed_size: u32,
-    pub uncompressed_size: u32,
-}
-impl DataDescriptor {
-    pub fn size() -> usize {
-        4 * 4
-    }
-}
-impl ValueWrite for DataDescriptor {
-    fn write_args<T: StreamSized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        let magic = &[0x50, 0x4B, 0x07, 0x08];
-        stream.write(magic)?;
-        stream
-            .write_value(self.crc32)?
-            .write_value_args(self.compressed_size, args)?
-            .write_value_args(self.uncompressed_size, args)?;
-        Ok(stream)
-    }
-}
-#[derive(Debug, Clone)]
-pub struct ZipFile {
-    pub min_version: u16,
-    pub flags: u16,
-    pub compression_method: CompressionType,
-    pub last_modification_time: u16,
-    pub last_modification_date: u16,
-    pub crc_32_uncompressed_data: u32,
-    pub compressed_size: u32,
-    pub uncompressed_size: u32,
-    pub file_name_length: u16,
-    pub extra_field_length: u16,
-    pub file_name: String,
-    pub extra_fields: Vec<Extra>,
-    pub data_descriptor: Option<DataDescriptor>,
-    pub data_position: u64,
-}
-impl ValueWrite for ZipFile {
-    fn write_args<T: StreamSized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
-        let mut stream = Stream::empty();
-        stream.with_endian(endian.clone());
-        stream.write_value_args(Magic::File, args)?;
-        stream.write_value_args(self.min_version, args)?;
-        stream.write_value_args(self.flags, args)?;
-        stream.write_value_args(self.compression_method, args)?;
-        stream.write_value_args(self.last_modification_time, args)?;
-        stream.write_value_args(self.last_modification_date, args)?;
-        stream.write_value_args(self.crc_32_uncompressed_data, args)?;
-        stream.write_value_args(self.compressed_size, args)?;
-        stream.write_value_args(self.uncompressed_size, args)?;
-        stream.write_value_args(self.file_name_length, args)?;
-        stream.write_value_args(self.extra_field_length, args)?;
-        stream.write_value_args(self.file_name.as_bytes().to_vec(), args)?;
-        for extra_field in self.extra_fields {
-            stream.write_value_args(extra_field, args)?;
-        }
-        if let Some(data_descriptor) = self.data_descriptor {
-            stream.write_value_args(data_descriptor, args)?;
-        }
-        Ok(stream)
-    }
-}
-impl ZipFile {
-    pub fn size(&self, center: bool) -> usize {
-        let mut bytes = ZIP_FILE_HEADER_SIZE + self.file_name.as_bytes().len();
-        for extra_field in &self.extra_fields {
-            bytes += extra_field.size(center) as usize
-        }
-        let data_descriptor_size = if self.data_descriptor.is_some() {
-            DataDescriptor::size()
-        } else {
-            0
-        };
-        bytes + data_descriptor_size
-    }
-}
-impl Directory {
+impl Directory<Parser> {
     pub fn exec_un_compress_size(&mut self) -> usize {
         if !self.compressed && self.compression_method == CompressionType::Deflate {
             self.data.length() as usize
@@ -450,95 +115,16 @@ impl Directory {
     }
 }
 
-impl ValueRead for ZipFile {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
-        let magic: Magic = stream.read_value()?;
-        if magic != Magic::File {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Invalid directory file magic number",
-            ));
-        }
-        let mut file = ZipFile {
-            min_version: stream.read_value()?,
-            flags: stream.read_value()?,
-            compression_method: stream.read_value()?,
-            last_modification_time: stream.read_value()?,
-            last_modification_date: stream.read_value()?,
-            crc_32_uncompressed_data: stream.read_value()?,
-            compressed_size: stream.read_value()?,
-            uncompressed_size: stream.read_value()?,
-            file_name_length: stream.read_value()?,
-            extra_field_length: stream.read_value()?,
-            file_name: "".to_string(),
-            extra_fields: vec![],
-            data_descriptor: None,
-            data_position: 0,
-        };
-        let file_name = stream.read_exact_size(file.file_name_length as u64)?;
-        let file_name =
-            String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-        file.file_name = file_name.clone();
-        let mut total_bytes = 0;
-        if file.extra_field_length > 0 {
-            loop {
-                let position = stream.position()?;
-                let extra_field: Extra = stream.read_value()?; //.read_exact_size(file.extra_field_length as u64)?;
-                file.extra_fields.push(extra_field);
-                let size = stream.position()? - position;
-                total_bytes += size;
-                if total_bytes >= file.extra_field_length as u64 {
-                    break;
-                }
-            }
-        }
-        file.data_position = stream.stream_position()?;
-        // if file.bit_flag & 0x0008 != 0 && file.uncompressed_size == 0 {
-        //     loop {
-        //         let mut buffer = vec![0_u8; 4096];
-        //         let bytes_read = stream.read(&mut buffer)?;
-        //         if bytes_read == 0 {
-        //             return Err(Error::new(
-        //                 ErrorKind::InvalidData,
-        //                 "Data Descriptor Invalid signature",
-        //             ));
-        //         }
-        //         let magic = &[0x50, 0x4B, 0x07, 0x08];
-        //         if let Some(position) = buffer.windows(4).position(|window| window == magic) {
-        //             let remaing_bytes = bytes_read - position;
-        //             if remaing_bytes < 16 {
-        //                 //补充剩下字节
-        //                 let mut remaing = vec![0_u8; 16 - remaing_bytes];
-        //                 let bytes_read = stream.read(&mut remaing)?;
-        //                 if bytes_read != 16 - remaing_bytes {
-        //                     return Err(Error::new(
-        //                         ErrorKind::InvalidData,
-        //                         "Data Descriptor Invalid signature",
-        //                     ));
-        //                 }
-        //                 buffer.extend_from_slice(&remaing);
-        //             }
-        //             let cursor = std::io::Cursor::new(buffer[4 + position..].to_vec());
-        //             let mut data = Stream::new(Data::Mem(cursor));
-        //             file.crc_32_uncompressed_data = data.read_value()?;
-        //             file.compressed_size = data.read_value()?;
-        //             file.uncompressed_size = data.read_value()?;
-        //             break;
-        //         }
-        //     }
-        // }
-        Ok(file)
-    }
-}
 const DIRECTORY_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 6
     + size_of::<u32>() * 3
     + size_of::<u16>() * 5
     + size_of::<u32>() * 2;
 #[derive(Debug, Clone)]
-pub struct Directory {
-    pub compressed: bool,
+pub struct Directory<TYPE> {
+    pub r#type: TYPE,
     pub data: Stream,
+    pub compressed: bool,
     pub version: u16,
     pub min_version: u16,
     pub flags: u16,
@@ -556,15 +142,16 @@ pub struct Directory {
     pub external_file_attributes: u32,
     pub offset_of_local_file_header: u32,
     pub file_name: String,
-    pub extra_fields: Vec<Extra>,
+    pub extra_fields: Vec<Extra<Center>>,
     pub file_comment: Vec<u8>,
-    pub file: ZipFile,
+    pub file: ZipFile<TYPE>,
 }
-impl Directory {
+impl Directory<Parser> {
     pub fn clone_all(&mut self) -> Result<Self> {
         Ok(Directory {
-            compressed: self.compressed,
+            r#type: Parser,
             data: self.data.clone_stream()?,
+            compressed: self.compressed,
             version: self.version,
             min_version: self.min_version,
             flags: self.flags,
@@ -589,8 +176,9 @@ impl Directory {
     }
     pub fn clone_not_stream(&self) -> Self {
         Directory {
-            compressed: self.compressed,
+            r#type: Parser,
             data: Stream::empty(),
+            compressed: self.compressed,
             version: self.version,
             min_version: self.min_version,
             flags: self.flags,
@@ -614,20 +202,20 @@ impl Directory {
         }
     }
 }
-impl Directory {
+impl Directory<Parser> {
     pub fn compressed(&self) -> bool {
         self.compressed
     }
-    pub fn size(&self, center: bool) -> usize {
+    pub fn size(&self) -> usize {
         let mut bytes =
             DIRECTORY_HEADER_SIZE + self.file_name.as_bytes().len() + self.file_comment.len();
         for extra_field in &self.extra_fields {
-            bytes += extra_field.size(center) as usize
+            bytes += extra_field.size() as usize
         }
         bytes
     }
 }
-impl ValueWrite for Directory {
+impl ValueWrite for Directory<Parser> {
     fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
@@ -648,15 +236,16 @@ impl ValueWrite for Directory {
         stream.write_value(self.internal_file_attributes)?;
         stream.write_value(self.external_file_attributes)?;
         stream.write_value(self.offset_of_local_file_header)?;
-        stream.write_value(self.file_name.as_bytes().to_vec())?;
+        stream.write(self.file_name.as_bytes())?;
         for extra_field in self.extra_fields {
             stream.write_value(extra_field)?;
         }
-        stream.write_value(self.file_comment)?;
+        stream.write(&self.file_comment)?;
+        // stream.write_value(self.file_comment)?;
         Ok(stream)
     }
 }
-impl ValueRead for Directory {
+impl ValueRead for Directory<Parser> {
     fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
@@ -681,59 +270,16 @@ impl ValueRead for Directory {
         let internal_file_attributes: u16 = stream.read_value()?;
         let external_file_attributes: u32 = stream.read_value()?;
         let offset_of_local_file_header: u32 = stream.read_value()?;
-        let mut extra_fields: Vec<Extra> = Vec::new();
-        // let file_name: String = "".to_string();
-        // let version: stream.read_value()?;
-        // let min_version: stream.read_value()?;
-        // let flags: stream.read_value()?;
-        // let compression_method: stream.read_value()?;
-        // let last_modification_time: stream.read_value()?;
-        // let last_modification_date: stream.read_value()?;
-        // let crc_32_uncompressed_data: stream.read_value()?;
-        // let compressed_size: stream.read_value()?;
-        // let uncompressed_size: stream.read_value()?;
-        // let file_name_length: stream.read_value()?;
-        // let extra_field_length: stream.read_value()?;
-        // let  file_comment_length: stream.read_value()?;
-        // let number_of_starts: stream.read_value()?;
-        // let internal_file_attributes: stream.read_value()?;
-        // let external_file_attributes: stream.read_value()?;
-        // let offset_of_local_file_header: stream.read_value()?;
-        // let file_name: "".to_string();
-        // let mut info = Self {
-        //     compressed: true,
-        //     data: None,
-        //     version: stream.read_value()?,
-        //     min_version: stream.read_value()?,
-        //     flags: stream.read_value()?,
-        //     compression_method: stream.read_value()?,
-        //     last_modification_time: stream.read_value()?,
-        //     last_modification_date: stream.read_value()?,
-        //     crc_32_uncompressed_data: stream.read_value()?,
-        //     compressed_size: stream.read_value()?,
-        //     uncompressed_size: stream.read_value()?,
-        //     file_name_length: stream.read_value()?,
-        //     extra_field_length: stream.read_value()?,
-        //     file_comment_length: stream.read_value()?,
-        //     number_of_starts: stream.read_value()?,
-        //     internal_file_attributes: stream.read_value()?,
-        //     external_file_attributes: stream.read_value()?,
-        //     offset_of_local_file_header: stream.read_value()?,
-        //     file_name: "".to_string(),
-        //     extra_fields: vec![],
-        //     file_comment: vec![],
-        //     file: None,
-        // };
+        let mut extra_fields: Vec<Extra<Center>> = Vec::new();
         let file_name = stream.read_exact_size(file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-        // info.file_name = file_name;
         let compressed = compression_method == CompressionType::Deflate;
         let mut total_bytes = 0;
         if extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra = stream.read_value_args(&Some(true))?; //.read_exact_size(file.extra_field_length as u64)?;
+                let extra_field: Extra<Center> = stream.read_value_args(&Some(true))?;
                 extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;
@@ -745,7 +291,7 @@ impl ValueRead for Directory {
         let file_comment = stream.read_exact_size(file_comment_length as u64)?;
         stream.pin()?;
         stream.seek(SeekFrom::Start(offset_of_local_file_header as u64))?;
-        let mut file: ZipFile = stream.read_value()?;
+        let mut file: ZipFile<Parser> = stream.read_value()?;
         if file.flags & 0x0008 != 0 {
             file.data_descriptor = Some(DataDescriptor {
                 crc32: crc_32_uncompressed_data,
@@ -753,18 +299,14 @@ impl ValueRead for Directory {
                 uncompressed_size,
             })
         }
-        // stream.pin()?;
         stream.seek(SeekFrom::Start(file.data_position))?;
         let data_bytes = stream.read_exact_size(compressed_size as u64)?;
         let mut data: Stream = stream.copy_empty()?;
         data.write_all(&data_bytes)?;
-        // stream.un_pin()?;
-        // file.uncompressed_size = info.uncompressed_size;
-        // file.compressed_size = info.compressed_size;
-        // file.crc_32_uncompressed_data = info.crc_32_uncompressed_data;
+        data.seek_start()?;
         stream.un_pin()?;
-        // info.file = Some(file);
         Ok(Self {
+            r#type: Parser,
             compressed,
             data,
             version,

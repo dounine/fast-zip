@@ -5,7 +5,7 @@ edition = "2024"
 publish = false
 
 [dependencies]
-fast-stream = { git = "https://github.com/dounine/fast-stream", features = ["all"] }
+fast-stream = { path = "../../fast-stream", features = ["all"] }
 fast-zip = { path = "..", features = ["all"] }
 serde = "1.0.219"
 plist = "1.7.2"

@@ -1,7 +1,9 @@
-use crate::directory::{CompressionType, DataDescriptor, Directory, Extra, ZipFile};
+use crate::directory::{CompressionType, Directory};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
-use fast_stream::bytes::{Bytes, ValueWrite};
+use crate::extra::{Center, Extra, Normal};
+use crate::zip_file::{DataDescriptor, ZipFile};
+use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
 use fast_stream::deflate::CompressionLevel;
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
@@ -9,30 +11,86 @@ use fast_stream::stream::Stream;
 use indexmap::IndexMap;
 use std::cmp::min;
 use std::io::Read;
+use std::ptr::addr_of_mut;
+use std::thread::sleep;
 
 #[derive(Debug, Clone)]
-pub struct Zip {
-    stream_size: usize,
-    pub stream: Option<Stream>,
-    crc32_computer: bool,
-    pub eo_cd: Option<EoCd>,
+pub struct Parser;
+#[derive(Debug, Clone)]
+pub struct Cache;
+
+#[derive(Debug, Clone)]
+pub struct Zip<TYPE> {
+    pub(crate) r#type: TYPE,
+    pub(crate) stream_size: u64,
+    pub(crate) stream: Option<Stream>,
+    pub(crate) crc32_computer: bool,
+    pub(crate) eo_cd: Option<EoCd<TYPE>>,
     pub write_clear: bool,
-    pub compression_level: CompressionLevel,
-    pub directories: IndexMap<String, Directory>,
+    pub(crate) compression_level: CompressionLevel,
+    pub directories: IndexMap<String, Directory<TYPE>>,
 }
-impl Zip {
-    pub fn size(&self) -> usize {
+#[derive(Debug, Clone)]
+pub struct CompressionLevelWrapper(pub CompressionLevel);
+impl ValueRead for CompressionLevelWrapper {
+    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
+        let value: i32 = stream.read_value_args(args)?;
+        Ok(CompressionLevelWrapper(match value {
+            0 => CompressionLevel::NoCompression,
+            1 => CompressionLevel::BestSpeed,
+            9 => CompressionLevel::BestCompression,
+            10 => CompressionLevel::UberCompression,
+            -1 => CompressionLevel::DefaultCompression,
+            _ => CompressionLevel::DefaultLevel,
+        }))
+    }
+}
+impl ValueWrite for CompressionLevelWrapper {
+    fn write_args<T: StreamSized>(
+        self,
+        endian: &Endian,
+        args: &Option<T>,
+    ) -> std::io::Result<Stream> {
+        let mut stream = Stream::empty();
+        stream.with_endian(endian.clone());
+        match self.0 {
+            CompressionLevel::NoCompression => {
+                stream.write_value_args(0_i32, args)?;
+            }
+            CompressionLevel::BestSpeed => {
+                stream.write_value_args(1_i32, args)?;
+            }
+            CompressionLevel::BestCompression => {
+                stream.write_value_args(9_i32, args)?;
+            }
+            CompressionLevel::UberCompression => {
+                stream.write_value_args(10_i32, args)?;
+            }
+            CompressionLevel::DefaultLevel => {
+                stream.write_value_args(6_i32, args)?;
+            }
+            CompressionLevel::DefaultCompression => {
+                stream.write_value_args(-1_i32, args)?;
+            }
+        }
+        Ok(stream)
+    }
+}
+impl Zip<Parser> {
+    pub fn size(&self) -> u64 {
         self.stream_size
     }
     pub fn with_crc32(&mut self, value: bool) {
         self.crc32_computer = value;
     }
-    pub fn create(stream: Stream) -> Zip {
+    pub fn create(stream: Stream) -> Self {
         Zip {
-            stream_size: stream.length() as usize,
+            r#type: Parser,
+            stream_size: stream.length(),
             stream: Some(stream),
             crc32_computer: false,
             eo_cd: Some(EoCd {
+                r#type: Parser,
                 number_of_disk: 0,
                 directory_starts: 0,
                 number_of_directory_disk: 0,
@@ -48,7 +106,8 @@ impl Zip {
     }
     pub fn new(stream: Stream) -> Result<Self, ZipError> {
         let mut info = Self {
-            stream_size: stream.length() as usize,
+            r#type: Parser,
+            stream_size: stream.length(),
             stream: Some(stream),
             eo_cd: None,
             write_clear: true,
@@ -64,11 +123,11 @@ impl Zip {
     }
     pub fn parse(&mut self) -> Result<(), ZipError> {
         if let Some(mut stream) = std::mem::take(&mut self.stream) {
-            let eo_cd = stream.read_value::<EoCd>()?;
+            let eo_cd = stream.read_value::<EoCd<Parser>>()?;
             stream.set_position(eo_cd.offset as u64)?;
             let mut directories = IndexMap::with_capacity(eo_cd.entries as usize);
             for _ in 0..eo_cd.entries {
-                let dir: Directory = stream.read_value()?;
+                let dir: Directory<Parser> = stream.read_value()?;
                 directories.insert(dir.file_name.clone(), dir);
             }
             self.directories = directories;
@@ -81,6 +140,7 @@ impl Zip {
     pub fn add_folder(&mut self, file_name: &str) -> Result<(), ZipError> {
         let file_name_length = file_name.as_bytes().len() as u16;
         let mut directory = Directory {
+            r#type: Parser,
             compressed: true,
             data: Stream::empty(),
             version: 798,
@@ -102,14 +162,20 @@ impl Zip {
             file_name: file_name.to_string(),
             extra_fields: vec![
                 Extra::UnixExtendedTimestamp {
+                    r#type: Center,
                     mtime: Some(0),
                     atime: None,
                     ctime: None,
                 },
-                Extra::UnixAttrs { uid: 503, gid: 20 },
+                Extra::UnixAttrs {
+                    // r#type: Center,
+                    uid: 503,
+                    gid: 20,
+                },
             ],
             file_comment: vec![],
             file: ZipFile {
+                r#type: Parser,
                 min_version: 10,
                 flags: 0,
                 compression_method: CompressionType::Store,
@@ -123,11 +189,16 @@ impl Zip {
                 file_name: file_name.to_string(),
                 extra_fields: vec![
                     Extra::UnixExtendedTimestamp {
+                        r#type: Normal,
                         mtime: Some(0),
                         atime: Some(0),
                         ctime: None,
                     },
-                    Extra::UnixAttrs { uid: 503, gid: 20 },
+                    Extra::UnixAttrs {
+                        // r#type: Normal,
+                        uid: 503,
+                        gid: 20,
+                    },
                 ],
                 data_descriptor: None,
                 data_position: 0,
@@ -135,12 +206,12 @@ impl Zip {
         };
         let mut extra_field_length = 0;
         for extra_field in &directory.extra_fields {
-            extra_field_length += extra_field.size(true);
+            extra_field_length += extra_field.size();
         }
         directory.extra_field_length = extra_field_length;
         let mut extra_field_length = 0;
         for extra_field in &directory.file.extra_fields {
-            extra_field_length += extra_field.size(false);
+            extra_field_length += extra_field.size();
         }
         directory.file.extra_field_length = extra_field_length;
 
@@ -158,7 +229,7 @@ impl Zip {
         }
         self.add_file(data, file_name)
     }
-    pub fn add_directory(&mut self, mut dir: Directory) {
+    pub fn add_directory(&mut self, mut dir: Directory<Parser>) {
         if dir.file_name != dir.file.file_name {
             dir.file.file_name = dir.file_name.clone();
         }
@@ -208,6 +279,7 @@ impl Zip {
         let internal_file_attributes = if Self::is_binary(&buffer) { 0 } else { 1 };
 
         let mut directory = Directory {
+            r#type: Parser,
             compressed: false,
             data,
             version: 798,
@@ -229,14 +301,20 @@ impl Zip {
             file_name: file_name.to_string(),
             extra_fields: vec![
                 Extra::UnixExtendedTimestamp {
+                    r#type: Center,
                     mtime: Some(1736154637),
                     atime: None,
                     ctime: None,
                 },
-                Extra::UnixAttrs { uid: 503, gid: 20 },
+                Extra::UnixAttrs {
+                    // r#type: Center,
+                    uid: 503,
+                    gid: 20,
+                },
             ],
             file_comment: vec![],
             file: ZipFile {
+                r#type: Parser,
                 min_version: 20,
                 flags: 0x08,
                 compression_method: CompressionType::Deflate,
@@ -250,11 +328,16 @@ impl Zip {
                 file_name: file_name.to_string(),
                 extra_fields: vec![
                     Extra::UnixExtendedTimestamp {
+                        r#type: Normal,
                         mtime: Some(1736154637),
                         atime: Some(1736195293),
                         ctime: None,
                     },
-                    Extra::UnixAttrs { uid: 503, gid: 20 },
+                    Extra::UnixAttrs {
+                        // r#type: Normal,
+                        uid: 503,
+                        gid: 20,
+                    },
                 ],
                 data_descriptor: Some(DataDescriptor {
                     crc32: crc_32_uncompressed_data,
@@ -266,12 +349,12 @@ impl Zip {
         };
         let mut extra_field_length = 0;
         for extra_field in &directory.extra_fields {
-            extra_field_length += extra_field.size(true);
+            extra_field_length += extra_field.size();
         }
         directory.extra_field_length = extra_field_length;
         let mut extra_field_length = 0;
         for extra_field in &directory.file.extra_fields {
-            extra_field_length += extra_field.size(false);
+            extra_field_length += extra_field.size();
         }
         directory.file.extra_field_length = extra_field_length;
         self.directories
@@ -295,8 +378,8 @@ impl Zip {
             director.exec(self.crc32_computer, &self.compression_level, callback)?;
             director.file_name_length = director.file_name.len() as u16;
             director.file.file_name_length = director.file_name_length;
-            files_size += director.file.size(false) + director.compressed_size as usize;
-            directors_size += director.size(true);
+            files_size += director.file.size() + director.compressed_size as usize;
+            directors_size += director.size();
         }
         if let Some(eo_cd) = &mut self.eo_cd {
             eo_cd.size = directors_size as u32;
@@ -320,7 +403,7 @@ impl Zip {
             )
         }
     }
-    pub fn write(
+    pub fn package(
         &mut self,
         output: &mut Stream,
         callback: &mut impl FnMut(usize, usize, String),
@@ -349,6 +432,7 @@ impl Zip {
                 header_stream.append(&mut data)?;
             }
         } else {
+            let mut count = 0;
             for (_, director) in &mut self.directories {
                 let mut file = director.file.clone();
                 let mut data_descriptor = file.data_descriptor.take();
@@ -367,6 +451,10 @@ impl Zip {
                     .write_args(&endian, &Some(true))?;
                 data.seek_start()?;
                 header_stream.append(&mut data)?;
+                // if count == 7 {
+                //     break;
+                // }
+                // count += 1;
             }
         }
         header_stream.seek_start()?;
