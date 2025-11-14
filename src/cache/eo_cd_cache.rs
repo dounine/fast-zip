@@ -1,6 +1,6 @@
 use crate::eocd::EoCd;
 use crate::zip::{Cache, Parser};
-use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
+use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 impl EoCd<Parser> {

@@ -1,6 +1,6 @@
 use crate::zip::{Cache, Parser};
 use crate::zip_file::ZipFile;
-use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
+use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 use std::io::Result;
