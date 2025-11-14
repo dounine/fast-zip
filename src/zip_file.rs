@@ -1,4 +1,4 @@
-use crate::directory::CompressionType;
+use crate::directory::CompressionMethod;
 use crate::extra::{Extra, Normal};
 use crate::magic::Magic;
 use crate::zip::Parser;
@@ -10,7 +10,7 @@ use std::io::{Error, ErrorKind, Result, Seek, Write};
 
 const ZIP_FILE_HEADER_SIZE: usize = Magic::byte_size()
     + size_of::<u16>() * 2
-    + CompressionType::byte_size()
+    + CompressionMethod::byte_size()
     + size_of::<u16>() * 2
     + size_of::<u32>() * 3
     + size_of::<u16>() * 2;
@@ -51,9 +51,10 @@ impl ValueWrite for DataDescriptor {
 #[derive(Debug, Clone)]
 pub struct ZipFile<TYPE> {
     pub r#type: TYPE,
-    pub min_version: u16,
+    pub extract_zip_spec: u8,
+    pub extract_os: u8,
     pub flags: u16,
-    pub compression_method: CompressionType,
+    pub compression_method: CompressionMethod,
     pub last_modification_time: u16,
     pub last_modification_date: u16,
     pub crc_32_uncompressed_data: u32,
@@ -67,13 +68,35 @@ pub struct ZipFile<TYPE> {
     pub data_position: u64,
 }
 impl ValueWrite for ZipFile<Parser> {
-    fn write_args<T: StreamSized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
+    fn write_args<T: StreamSized>(mut self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value_args(Magic::File, args)?;
-        stream.write_value_args(self.min_version, args)?;
+        let compression_method = if self.uncompressed_size == 0 {
+            CompressionMethod::Store
+        } else {
+            self.compression_method
+        };
+        let file_is_dir = self.file_name.ends_with("/");
+        if file_is_dir {
+            stream.write_value_args(10_u8, args)?; //extract_zip_spec
+        } else {
+            stream.write_value_args(14_u8, args)?; //extract_zip_spec
+        }
+
+        let mut extra_field_stream = Stream::empty();
+        self.extra_field_length = 0;
+        for extra_field in self.extra_fields {
+            self.extra_field_length += extra_field.size();
+            extra_field_stream.write_value(extra_field)?;
+        }
+        extra_field_stream.seek_start()?;
+
+        self.file_name_length = self.file_name.as_bytes().len() as u16;
+
+        stream.write_value_args(self.extract_os, args)?;
         stream.write_value_args(self.flags, args)?;
-        stream.write_value_args(self.compression_method, args)?;
+        stream.write_value_args(compression_method, args)?;
         stream.write_value_args(self.last_modification_time, args)?;
         stream.write_value_args(self.last_modification_date, args)?;
         stream.write_value_args(self.crc_32_uncompressed_data, args)?;
@@ -82,9 +105,7 @@ impl ValueWrite for ZipFile<Parser> {
         stream.write_value_args(self.file_name_length, args)?;
         stream.write_value_args(self.extra_field_length, args)?;
         stream.write(self.file_name.as_bytes())?;
-        for extra_field in self.extra_fields {
-            stream.write_value_args(extra_field, args)?;
-        }
+        stream.append(&mut extra_field_stream)?;
         if let Some(data_descriptor) = self.data_descriptor {
             stream.write_value_args(data_descriptor, args)?;
         }
@@ -102,7 +123,8 @@ impl ValueRead for ZipFile<Parser> {
         }
         let mut file = ZipFile {
             r#type: Parser,
-            min_version: stream.read_value()?,
+            extract_zip_spec: stream.read_value()?,
+            extract_os: stream.read_value()?,
             flags: stream.read_value()?,
             compression_method: stream.read_value()?,
             last_modification_time: stream.read_value()?,

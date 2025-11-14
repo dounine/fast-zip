@@ -59,13 +59,13 @@ impl<TYPE: CenterValue> Extra<TYPE> {
                 mtime,
                 ..
             } => {
-                1 + Self::optional_field_size(mtime) + {
-                    if !r#type.value() {
-                        Self::optional_field_size(atime) + Self::optional_field_size(ctime)
-                    } else {
-                        0
-                    }
-                }
+                1 + Self::optional_field_size(mtime) +
+                    // if !r#type.value() {
+                    Self::optional_field_size(atime) + Self::optional_field_size(ctime)
+                    // } else {
+                    //     0
+                    // }
+
             }
             Extra::UnixAttrs { .. } => 11,
         }
@@ -112,21 +112,20 @@ impl<TYPE: CenterValue> ValueWrite for Extra<TYPE> {
                 ctime,
                 ..
             } => {
-                let flags = Self::if_present(mtime, 1)
-                    | Self::if_present(Some(1), 1 << 1)
-                    | Self::if_present(ctime, 1 << 2);
+                let flags: u8 = 3;
+                // Self::if_present(mtime, 1) | Self::if_present(Some(1), 1 << 1) | Self::if_present(ctime, 1 << 2);
                 stream.write_value(flags)?;
                 if let Some(mtime) = mtime {
                     stream.write_value(mtime)?;
                 }
-                if !r#type.value() {
-                    if let Some(atime) = atime {
-                        stream.write_value(atime)?;
-                    }
-                    if let Some(ctime) = ctime {
-                        stream.write_value(ctime)?;
-                    }
+                // if !r#type.value() {
+                if let Some(atime) = atime {
+                    stream.write_value(atime)?;
                 }
+                if let Some(ctime) = ctime {
+                    stream.write_value(ctime)?;
+                }
+                // }
             }
             Extra::UnixAttrs { uid, gid, .. } => {
                 stream.write_value(1_u8)?;

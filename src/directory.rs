@@ -9,6 +9,7 @@ use fast_stream::endian::Endian;
 use fast_stream::enum_to_bytes;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
+use std::cmp::max;
 use std::fmt::Debug;
 use std::io::{Error, ErrorKind, Result, Seek, SeekFrom, Write};
 
@@ -17,7 +18,7 @@ pub trait Size {
 }
 #[repr(u16)]
 #[derive(Debug, Clone, Default, PartialEq, NumToEnum)]
-pub enum CompressionType {
+pub enum CompressionMethod {
     #[default]
     Store = 0x0000,
     Shrink = 0x0001,
@@ -32,15 +33,15 @@ pub enum CompressionType {
     PPMd = 0x0062,
     AES = 0x0063,
 }
-impl CompressionType {
+impl CompressionMethod {
     pub const fn byte_size() -> usize {
         2
     }
 }
-enum_to_bytes!(CompressionType, u16);
+enum_to_bytes!(CompressionMethod, u16);
 impl Directory<Parser> {
     pub fn exec_un_compress_size(&mut self) -> usize {
-        if !self.compressed && self.compression_method == CompressionType::Deflate {
+        if !self.compressed && self.compression_method == CompressionMethod::Deflate {
             self.data.length() as usize
         } else {
             0
@@ -52,7 +53,7 @@ impl Directory<Parser> {
         compression_level: &CompressionLevel,
         callback: &mut impl FnMut(usize),
     ) -> Result<()> {
-        if !self.compressed && self.compression_method == CompressionType::Deflate {
+        if !self.compressed && self.compression_method == CompressionMethod::Deflate {
             let crc_32_uncompressed_data = if crc32_computer {
                 self.data.init_crc32();
                 self.data.hash_computer()?;
@@ -125,10 +126,12 @@ pub struct Directory<TYPE> {
     pub r#type: TYPE,
     pub data: Stream,
     pub compressed: bool,
-    pub version: u16,
-    pub min_version: u16,
+    pub created_zip_spec: u8,
+    pub created_os: u8,
+    pub extract_zip_spec: u8,
+    pub extract_os: u8,
     pub flags: u16,
-    pub compression_method: CompressionType,
+    pub compression_method: CompressionMethod,
     pub last_modification_time: u16,
     pub last_modification_date: u16,
     pub crc_32_uncompressed_data: u32,
@@ -152,8 +155,10 @@ impl Directory<Parser> {
             r#type: Parser,
             data: self.data.clone_stream()?,
             compressed: self.compressed,
-            version: self.version,
-            min_version: self.min_version,
+            created_zip_spec: self.created_zip_spec,
+            created_os: self.created_os,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method.clone(),
             last_modification_time: self.last_modification_time,
@@ -179,8 +184,10 @@ impl Directory<Parser> {
             r#type: Parser,
             data: Stream::empty(),
             compressed: self.compressed,
-            version: self.version,
-            min_version: self.min_version,
+            created_zip_spec: self.created_zip_spec,
+            created_os: self.created_os,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method.clone(),
             last_modification_time: self.last_modification_time,
@@ -216,14 +223,35 @@ impl Directory<Parser> {
     }
 }
 impl ValueWrite for Directory<Parser> {
-    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
+    fn write_args<T: Sized>(mut self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
+        let compression_method = if self.uncompressed_size == 0 {
+            CompressionMethod::Store
+        } else {
+            self.compression_method
+        };
+        self.flags = 0;
+
+        let mut extra_field_stream = Stream::empty();
+        self.extra_field_length = 0;
+        for extra_field in self.extra_fields {
+            self.extra_field_length += extra_field.size();
+            extra_field_stream.write_value(extra_field)?;
+        }
+        extra_field_stream.seek_start()?;
+
+        self.file_comment_length = self.file_comment.len() as u16;
+        self.file_name_length = self.file_name.as_bytes().len() as u16;
+
+        //禁止流式格式
         stream.write_value(Magic::Directory)?;
-        stream.write_value(self.version)?;
-        stream.write_value(self.min_version)?;
+        stream.write_value(self.created_zip_spec)?;
+        stream.write_value(self.created_os)?;
+        stream.write_value(self.extract_zip_spec)?;
+        stream.write_value(self.extract_os)?;
         stream.write_value(self.flags)?;
-        stream.write_value(self.compression_method)?;
+        stream.write_value(compression_method)?;
         stream.write_value(self.last_modification_time)?;
         stream.write_value(self.last_modification_date)?;
         stream.write_value(self.crc_32_uncompressed_data)?;
@@ -237,11 +265,8 @@ impl ValueWrite for Directory<Parser> {
         stream.write_value(self.external_file_attributes)?;
         stream.write_value(self.offset_of_local_file_header)?;
         stream.write(self.file_name.as_bytes())?;
-        for extra_field in self.extra_fields {
-            stream.write_value(extra_field)?;
-        }
+        stream.append(&mut extra_field_stream)?;
         stream.write(&self.file_comment)?;
-        // stream.write_value(self.file_comment)?;
         Ok(stream)
     }
 }
@@ -254,10 +279,12 @@ impl ValueRead for Directory<Parser> {
                 "Invalid directory magic number",
             ));
         }
-        let version: u16 = stream.read_value()?;
-        let min_version: u16 = stream.read_value()?;
+        let created_zip_spec: u8 = stream.read_value()?;
+        let created_os: u8 = stream.read_value()?;
+        let extract_zip_spec: u8 = stream.read_value()?;
+        let extract_os: u8 = stream.read_value()?;
         let flags: u16 = stream.read_value()?;
-        let compression_method: CompressionType = stream.read_value()?;
+        let compression_method: CompressionMethod = stream.read_value()?;
         let last_modification_time: u16 = stream.read_value()?;
         let last_modification_date: u16 = stream.read_value()?;
         let crc_32_uncompressed_data: u32 = stream.read_value()?;
@@ -274,7 +301,7 @@ impl ValueRead for Directory<Parser> {
         let file_name = stream.read_exact_size(file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
-        let compressed = compression_method == CompressionType::Deflate;
+        let compressed = compression_method == CompressionMethod::Deflate;
         let mut total_bytes = 0;
         if extra_field_length > 0 {
             loop {
@@ -292,12 +319,18 @@ impl ValueRead for Directory<Parser> {
         stream.pin()?;
         stream.seek(SeekFrom::Start(offset_of_local_file_header as u64))?;
         let mut file: ZipFile<Parser> = stream.read_value()?;
+        file.compressed_size = max(compressed_size, file.uncompressed_size);
+        file.uncompressed_size = max(uncompressed_size, file.uncompressed_size);
+        file.crc_32_uncompressed_data =
+            max(crc_32_uncompressed_data, file.crc_32_uncompressed_data);
         if file.flags & 0x0008 != 0 {
-            file.data_descriptor = Some(DataDescriptor {
-                crc32: crc_32_uncompressed_data,
-                compressed_size,
-                uncompressed_size,
-            })
+            //TODO数据是流式的
+            file.flags = 0; // 强转非流式
+            // file.data_descriptor = Some(DataDescriptor {
+            //     crc32: crc_32_uncompressed_data,
+            //     compressed_size,
+            //     uncompressed_size,
+            // })
         }
         stream.seek(SeekFrom::Start(file.data_position))?;
         let data_bytes = stream.read_exact_size(compressed_size as u64)?;
@@ -309,8 +342,10 @@ impl ValueRead for Directory<Parser> {
             r#type: Parser,
             compressed,
             data,
-            version,
-            min_version,
+            created_zip_spec,
+            created_os,
+            extract_zip_spec,
+            extract_os,
             flags,
             compression_method,
             last_modification_time,

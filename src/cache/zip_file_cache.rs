@@ -8,7 +8,8 @@ impl ZipFile<Parser> {
     pub fn into_cache(self) -> ZipFile<Cache> {
         ZipFile {
             r#type: Cache,
-            min_version: self.min_version,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method,
             last_modification_time: self.last_modification_time,
@@ -29,7 +30,8 @@ impl ZipFile<Cache> {
     pub fn to_parser(self) -> ZipFile<Parser> {
         ZipFile {
             r#type: Parser,
-            min_version: self.min_version,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method,
             last_modification_time: self.last_modification_time,
@@ -50,7 +52,8 @@ impl ValueRead for ZipFile<Cache> {
     fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> Result<Self> {
         let file = ZipFile {
             r#type: Cache,
-            min_version: stream.read_value()?,
+            extract_zip_spec: stream.read_value()?,
+            extract_os: stream.read_value()?,
             flags: stream.read_value()?,
             compression_method: stream.read_value()?,
             last_modification_time: stream.read_value()?,
@@ -72,7 +75,8 @@ impl ValueWrite for ZipFile<Cache> {
     fn write_args<T: StreamSized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value_args(self.min_version, args)?;
+        stream.write_value_args(self.extract_zip_spec, args)?;
+        stream.write_value_args(self.extract_os, args)?;
         stream.write_value_args(self.flags, args)?;
         stream.write_value_args(self.compression_method, args)?;
         stream.write_value_args(self.last_modification_time, args)?;

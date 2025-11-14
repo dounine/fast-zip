@@ -1,10 +1,10 @@
-use crate::directory::{CompressionType, Directory};
+use crate::directory::{CompressionMethod, Directory};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
 use crate::extra::{Center, Extra, Normal};
 use crate::zip_file::{DataDescriptor, ZipFile};
 use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
-use fast_stream::deflate::CompressionLevel;
+use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
@@ -143,10 +143,12 @@ impl Zip<Parser> {
             r#type: Parser,
             compressed: true,
             data: Stream::empty(),
-            version: 798,
-            min_version: 10,
+            created_zip_spec: 0x1E, //3.0
+            created_os: 3,          //Uninx
+            extract_zip_spec: 14,   //2.0
+            extract_os: 0,          //MS-DOS
             flags: 0,
-            compression_method: CompressionType::Store,
+            compression_method: CompressionMethod::Store,
             last_modification_time: 39620,
             last_modification_date: 23170,
             crc_32_uncompressed_data: 0,
@@ -169,16 +171,17 @@ impl Zip<Parser> {
                 },
                 Extra::UnixAttrs {
                     // r#type: Center,
-                    uid: 503,
-                    gid: 20,
+                    uid: 0x1F7,
+                    gid: 0x14,
                 },
             ],
             file_comment: vec![],
             file: ZipFile {
                 r#type: Parser,
-                min_version: 10,
+                extract_zip_spec: 0x0A, //1.0
+                extract_os: 0,          //MS-DOS
                 flags: 0,
-                compression_method: CompressionType::Store,
+                compression_method: CompressionMethod::Store,
                 last_modification_time: 39620,
                 last_modification_date: 23170,
                 crc_32_uncompressed_data: 0,
@@ -204,17 +207,16 @@ impl Zip<Parser> {
                 data_position: 0,
             },
         };
-        let mut extra_field_length = 0;
-        for extra_field in &directory.extra_fields {
-            extra_field_length += extra_field.size();
-        }
-        directory.extra_field_length = extra_field_length;
-        let mut extra_field_length = 0;
-        for extra_field in &directory.file.extra_fields {
-            extra_field_length += extra_field.size();
-        }
-        directory.file.extra_field_length = extra_field_length;
-
+        // let mut extra_field_length = 0;
+        // for extra_field in &directory.extra_fields {
+        //     extra_field_length += extra_field.size();
+        // }
+        // directory.extra_field_length = extra_field_length;
+        // let mut extra_field_length = 0;
+        // for extra_field in &directory.file.extra_fields {
+        //     extra_field_length += extra_field.size();
+        // }
+        // directory.file.extra_field_length = extra_field_length;
         self.directories
             .insert(directory.file_name.clone(), directory);
         Ok(())
@@ -268,7 +270,6 @@ impl Zip<Parser> {
         ratio > bin_threshold
     }
     pub fn add_file(&mut self, mut data: Stream, file_name: &str) -> Result<(), ZipError> {
-        let file_name_length = file_name.as_bytes().len() as u16;
         let uncompressed_size = data.length() as u32;
         let crc_32_uncompressed_data = 0; //data.crc32_value();
         let compressed_size = uncompressed_size; //data.compress(CompressionLevel::DefaultLevel)? as u32;
@@ -282,16 +283,18 @@ impl Zip<Parser> {
             r#type: Parser,
             compressed: false,
             data,
-            version: 798,
-            min_version: 20,
-            flags: 0x08,
-            compression_method: CompressionType::Deflate,
+            created_zip_spec: 0x1E, //3.0
+            created_os: 0x03,       //Uninx
+            extract_zip_spec: 0x0E, //2.0
+            extract_os: 0,          //MS-DOS
+            flags: 0,
+            compression_method: CompressionMethod::Deflate,
             last_modification_time: 39620,
             last_modification_date: 23170,
             crc_32_uncompressed_data,
             compressed_size,
             uncompressed_size,
-            file_name_length,
+            file_name_length: 0,
             extra_field_length: 0,
             file_comment_length: 0,
             number_of_starts: 0,
@@ -315,15 +318,16 @@ impl Zip<Parser> {
             file_comment: vec![],
             file: ZipFile {
                 r#type: Parser,
-                min_version: 20,
-                flags: 0x08,
-                compression_method: CompressionType::Deflate,
+                extract_zip_spec: 0x0E, //1.4
+                extract_os: 0,          //MS-DOS
+                flags: 0,
+                compression_method: CompressionMethod::Deflate,
                 last_modification_time: 39620,
                 last_modification_date: 23170,
-                crc_32_uncompressed_data: 0,
-                compressed_size: 0,
+                crc_32_uncompressed_data,
+                compressed_size,
                 uncompressed_size,
-                file_name_length,
+                file_name_length: 0,
                 extra_field_length: 0,
                 file_name: file_name.to_string(),
                 extra_fields: vec![
@@ -339,24 +343,25 @@ impl Zip<Parser> {
                         gid: 20,
                     },
                 ],
-                data_descriptor: Some(DataDescriptor {
-                    crc32: crc_32_uncompressed_data,
-                    compressed_size,
-                    uncompressed_size,
-                }),
+                data_descriptor: None,
+                // data_descriptor: Some(DataDescriptor {
+                //     crc32: crc_32_uncompressed_data,
+                //     compressed_size,
+                //     uncompressed_size,
+                // }),
                 data_position: 0,
             },
         };
-        let mut extra_field_length = 0;
-        for extra_field in &directory.extra_fields {
-            extra_field_length += extra_field.size();
-        }
-        directory.extra_field_length = extra_field_length;
-        let mut extra_field_length = 0;
-        for extra_field in &directory.file.extra_fields {
-            extra_field_length += extra_field.size();
-        }
-        directory.file.extra_field_length = extra_field_length;
+        // let mut extra_field_length = 0;
+        // for extra_field in &directory.extra_fields {
+        //     extra_field_length += extra_field.size();
+        // }
+        // directory.extra_field_length = extra_field_length;
+        // let mut extra_field_length = 0;
+        // for extra_field in &directory.file.extra_fields {
+        //     extra_field_length += extra_field.size();
+        // }
+        // directory.file.extra_field_length = extra_field_length;
         self.directories
             .insert(directory.file_name.clone(), directory);
         Ok(())
@@ -412,6 +417,8 @@ impl Zip<Parser> {
         let total_size = self.computer_un_compress_size();
         let mut binding = 0;
         let mut callback = Self::create_adapter(total_size, &mut binding, callback);
+        // self.directories
+        //     .retain(|k, _| k == "Payload/Grace.app/Info.plist");
         self.computer(&mut callback)?;
         let mut header_stream = output.copy_empty()?;
         if self.write_clear {
@@ -435,6 +442,9 @@ impl Zip<Parser> {
             let mut count = 0;
             for (_, director) in &mut self.directories {
                 let mut file = director.file.clone();
+                // file.compressed_size = director.compressed_size;
+                // file.uncompressed_size = director.uncompressed_size;
+                // file.crc_32_uncompressed_data = director.crc_32_uncompressed_data;
                 let mut data_descriptor = file.data_descriptor.take();
                 let mut data = &mut director.data;
                 let mut stream = file.write(&endian)?;
@@ -446,15 +456,14 @@ impl Zip<Parser> {
                 if let Some(data_descriptor) = data_descriptor.take() {
                     output.write_value(data_descriptor)?;
                 }
+                // if count <=1 {
                 let mut data = director
                     .clone_not_stream()
-                    .write_args(&endian, &Some(true))?;
+                    .write_args::<bool>(&endian, &None)?;
                 data.seek_start()?;
                 header_stream.append(&mut data)?;
-                // if count == 7 {
-                //     break;
                 // }
-                // count += 1;
+                count += 1;
             }
         }
         header_stream.seek_start()?;

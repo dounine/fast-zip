@@ -1,4 +1,4 @@
-use crate::directory::{CompressionType, Directory};
+use crate::directory::{CompressionMethod, Directory};
 use crate::extra::{Center, Extra};
 use crate::zip::{Cache, Parser};
 use crate::zip_file::ZipFile;
@@ -13,8 +13,10 @@ impl Directory<Cache> {
             r#type: Parser,
             data: self.data,
             compressed: self.compressed,
-            version: self.version,
-            min_version: self.min_version,
+            created_zip_spec: self.created_zip_spec,
+            created_os: self.created_os,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method,
             last_modification_time: self.last_modification_time,
@@ -42,8 +44,10 @@ impl Directory<Parser> {
             r#type: Cache,
             data: self.data,
             compressed: self.compressed,
-            version: self.version,
-            min_version: self.min_version,
+            created_zip_spec: self.created_zip_spec,
+            created_os: self.created_os,
+            extract_zip_spec: self.extract_zip_spec,
+            extract_os: self.extract_os,
             flags: self.flags,
             compression_method: self.compression_method,
             last_modification_time: self.last_modification_time,
@@ -74,8 +78,10 @@ impl ValueWrite for Directory<Cache> {
         stream.write_value(self.data.length())?;
         stream.append(&mut self.data)?;
         stream.write_value(self.compressed)?;
-        stream.write_value(self.version)?;
-        stream.write_value(self.min_version)?;
+        stream.write_value(self.created_zip_spec)?;
+        stream.write_value(self.created_os)?;
+        stream.write_value(self.extract_zip_spec)?;
+        stream.write_value(self.extract_os)?;
         stream.write_value(self.flags)?;
         stream.write_value(self.compression_method)?;
         stream.write_value(self.last_modification_time)?;
@@ -101,10 +107,12 @@ impl ValueRead for Directory<Cache> {
     fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> Result<Self> {
         let data: Vec<u8> = stream.read_value()?;
         let compressed: bool = stream.read_value()?;
-        let version: u16 = stream.read_value()?;
-        let min_version: u16 = stream.read_value()?;
+        let created_zip_spec: u8 = stream.read_value()?;
+        let created_os: u8 = stream.read_value()?;
+        let extract_zip_spec: u8 = stream.read_value()?;
+        let extract_os: u8 = stream.read_value()?;
         let flags: u16 = stream.read_value()?;
-        let compression_method: CompressionType = stream.read_value()?;
+        let compression_method: CompressionMethod = stream.read_value()?;
         let last_modification_time: u16 = stream.read_value()?;
         let last_modification_date: u16 = stream.read_value()?;
         let crc_32_uncompressed_data: u32 = stream.read_value()?;
@@ -125,8 +133,10 @@ impl ValueRead for Directory<Cache> {
             r#type: Cache,
             data: data.into(),
             compressed,
-            version,
-            min_version,
+            created_zip_spec,
+            created_os,
+            extract_zip_spec,
+            extract_os,
             flags,
             compression_method,
             last_modification_time,
