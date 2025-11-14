@@ -1,7 +1,7 @@
-use crate::extra::{Extra};
+use crate::extra::Extra;
 use crate::magic::Magic;
 use crate::zip::Parser;
-use crate::zip_file::{ZipFile};
+use crate::zip_file::ZipFile;
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::derive::NumToEnum;
@@ -223,7 +223,7 @@ impl Directory<Parser> {
     }
 }
 impl ValueWrite for Directory<Parser> {
-    fn write_args<T: Sized>(mut self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
+    fn write(mut self, endian: &Endian) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         let compression_method = if self.uncompressed_size == 0 {
@@ -271,7 +271,7 @@ impl ValueWrite for Directory<Parser> {
     }
 }
 impl ValueRead for Directory<Parser> {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
+    fn read(stream: &mut Stream) -> Result<Self> {
         let magic: Magic = stream.read_value()?;
         if magic != Magic::Directory {
             return Err(Error::new(
@@ -306,7 +306,7 @@ impl ValueRead for Directory<Parser> {
         if extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra = stream.read_value_args(&Some(true))?;
+                let extra_field: Extra = stream.read_value()?;
                 extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;

@@ -32,7 +32,7 @@ impl EoCd<Cache> {
     }
 }
 impl ValueRead for EoCd<Cache> {
-    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
         Ok(Self {
             r#type: Cache,
             number_of_disk: stream.read_value()?,
@@ -46,11 +46,7 @@ impl ValueRead for EoCd<Cache> {
     }
 }
 impl ValueWrite for EoCd<Cache> {
-    fn write_args<T: StreamSized>(
-        self,
-        endian: &Endian,
-        args: &Option<T>,
-    ) -> std::io::Result<Stream> {
+    fn write(self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(self.number_of_disk)?;

@@ -1,10 +1,10 @@
 use crate::directory::{CompressionMethod, Directory};
 use crate::eocd::EoCd;
 use crate::error::ZipError;
-use crate::extra::{Extra};
-use crate::zip_file::{ZipFile};
+use crate::extra::Extra;
+use crate::zip_file::ZipFile;
 use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
-use fast_stream::deflate::{CompressionLevel};
+use fast_stream::deflate::CompressionLevel;
 use fast_stream::endian::Endian;
 use fast_stream::pin::Pin;
 use fast_stream::stream::Stream;
@@ -30,8 +30,8 @@ pub struct Zip<TYPE> {
 #[derive(Debug, Clone)]
 pub struct CompressionLevelWrapper(pub CompressionLevel);
 impl ValueRead for CompressionLevelWrapper {
-    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
-        let value: i32 = stream.read_value_args(args)?;
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
+        let value: i32 = stream.read_value()?;
         Ok(CompressionLevelWrapper(match value {
             0 => CompressionLevel::NoCompression,
             1 => CompressionLevel::BestSpeed,
@@ -43,31 +43,27 @@ impl ValueRead for CompressionLevelWrapper {
     }
 }
 impl ValueWrite for CompressionLevelWrapper {
-    fn write_args<T: StreamSized>(
-        self,
-        endian: &Endian,
-        args: &Option<T>,
-    ) -> std::io::Result<Stream> {
+    fn write(self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         match self.0 {
             CompressionLevel::NoCompression => {
-                stream.write_value_args(0_i32, args)?;
+                stream.write_value(0_i32)?;
             }
             CompressionLevel::BestSpeed => {
-                stream.write_value_args(1_i32, args)?;
+                stream.write_value(1_i32)?;
             }
             CompressionLevel::BestCompression => {
-                stream.write_value_args(9_i32, args)?;
+                stream.write_value(9_i32)?;
             }
             CompressionLevel::UberCompression => {
-                stream.write_value_args(10_i32, args)?;
+                stream.write_value(10_i32)?;
             }
             CompressionLevel::DefaultLevel => {
-                stream.write_value_args(6_i32, args)?;
+                stream.write_value(6_i32)?;
             }
             CompressionLevel::DefaultCompression => {
-                stream.write_value_args(-1_i32, args)?;
+                stream.write_value(-1_i32)?;
             }
         }
         Ok(stream)
@@ -189,10 +185,7 @@ impl Zip<Parser> {
                         atime: Some(0),
                         ctime: None,
                     },
-                    Extra::UnixAttrs {
-                        uid: 503,
-                        gid: 20,
-                    },
+                    Extra::UnixAttrs { uid: 503, gid: 20 },
                 ],
                 data_descriptor: None,
                 data_position: 0,
@@ -299,10 +292,7 @@ impl Zip<Parser> {
                     atime: None,
                     ctime: None,
                 },
-                Extra::UnixAttrs {
-                    uid: 503,
-                    gid: 20,
-                },
+                Extra::UnixAttrs { uid: 503, gid: 20 },
             ],
             file_comment: vec![],
             file: ZipFile {
@@ -325,10 +315,7 @@ impl Zip<Parser> {
                         atime: Some(1736195293),
                         ctime: None,
                     },
-                    Extra::UnixAttrs {
-                        uid: 503,
-                        gid: 20,
-                    },
+                    Extra::UnixAttrs { uid: 503, gid: 20 },
                 ],
                 data_descriptor: None,
                 // data_descriptor: Some(DataDescriptor {
@@ -421,7 +408,7 @@ impl Zip<Parser> {
                 if let Some(data_descriptor) = data_descriptor.take() {
                     output.write_value(data_descriptor)?;
                 }
-                let mut data = director.write_args(&endian, &Some(true))?;
+                let mut data = director.write(&endian)?;
                 data.seek_start()?;
                 header_stream.append(&mut data)?;
             }
@@ -439,9 +426,7 @@ impl Zip<Parser> {
                 if let Some(data_descriptor) = data_descriptor.take() {
                     output.write_value(data_descriptor)?;
                 }
-                let mut data = director
-                    .clone_not_stream()
-                    .write_args::<bool>(&endian, &None)?;
+                let mut data = director.clone_not_stream().write(&endian)?;
                 data.seek_start()?;
                 header_stream.append(&mut data)?;
             }

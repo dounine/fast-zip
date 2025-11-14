@@ -71,7 +71,7 @@ impl Directory<Parser> {
 }
 
 impl ValueWrite for Directory<Cache> {
-    fn write_args<T: Sized>(mut self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
+    fn write(mut self, endian: &Endian) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         self.data.seek_start()?;
@@ -104,7 +104,7 @@ impl ValueWrite for Directory<Cache> {
     }
 }
 impl ValueRead for Directory<Cache> {
-    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> Result<Self> {
+    fn read(stream: &mut Stream) -> Result<Self> {
         let data: Vec<u8> = stream.read_value()?;
         let compressed: bool = stream.read_value()?;
         let created_zip_spec: u8 = stream.read_value()?;

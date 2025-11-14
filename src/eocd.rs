@@ -19,7 +19,7 @@ pub struct EoCd<TYPE> {
 }
 
 impl ValueWrite for EoCd<Parser> {
-    fn write_args<T: Sized>(self, endian: &Endian, _args: &Option<T>) -> Result<Stream> {
+    fn write(self, endian: &Endian) -> Result<Stream> {
         let mut output = Stream::empty();
         output.with_endian(endian.clone());
         output.write_value(Magic::EoCd)?;
@@ -76,7 +76,7 @@ impl EoCd<Parser> {
 }
 
 impl ValueRead for EoCd<Parser> {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
+    fn read(stream: &mut Stream) -> Result<Self> {
         let eocd_offset = Self::find_offset(stream)?;
         stream.seek(SeekFrom::End(-(eocd_offset as i64)))?;
         stream.seek(SeekFrom::Current(4))?;

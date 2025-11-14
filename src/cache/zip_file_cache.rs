@@ -49,7 +49,7 @@ impl ZipFile<Cache> {
     }
 }
 impl ValueRead for ZipFile<Cache> {
-    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> Result<Self> {
+    fn read(stream: &mut Stream) -> Result<Self> {
         let file = ZipFile {
             r#type: Cache,
             extract_zip_spec: stream.read_value()?,
@@ -72,24 +72,24 @@ impl ValueRead for ZipFile<Cache> {
     }
 }
 impl ValueWrite for ZipFile<Cache> {
-    fn write_args<T: StreamSized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
+    fn write(self, endian: &Endian) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
-        stream.write_value_args(self.extract_zip_spec, args)?;
-        stream.write_value_args(self.extract_os, args)?;
-        stream.write_value_args(self.flags, args)?;
-        stream.write_value_args(self.compression_method, args)?;
-        stream.write_value_args(self.last_modification_time, args)?;
-        stream.write_value_args(self.last_modification_date, args)?;
-        stream.write_value_args(self.crc_32_uncompressed_data, args)?;
-        stream.write_value_args(self.compressed_size, args)?;
-        stream.write_value_args(self.uncompressed_size, args)?;
-        stream.write_value_args(self.file_name_length, args)?;
-        stream.write_value_args(self.extra_field_length, args)?;
-        stream.write_value_args(self.file_name, args)?;
-        stream.write_value_args(self.extra_fields, args)?;
-        stream.write_value_args(self.data_descriptor, args)?;
-        stream.write_value_args(self.data_position, args)?;
+        stream.write_value(self.extract_zip_spec)?;
+        stream.write_value(self.extract_os)?;
+        stream.write_value(self.flags)?;
+        stream.write_value(self.compression_method)?;
+        stream.write_value(self.last_modification_time)?;
+        stream.write_value(self.last_modification_date)?;
+        stream.write_value(self.crc_32_uncompressed_data)?;
+        stream.write_value(self.compressed_size)?;
+        stream.write_value(self.uncompressed_size)?;
+        stream.write_value(self.file_name_length)?;
+        stream.write_value(self.extra_field_length)?;
+        stream.write_value(self.file_name)?;
+        stream.write_value(self.extra_fields)?;
+        stream.write_value(self.data_descriptor)?;
+        stream.write_value(self.data_position)?;
         Ok(stream)
     }
 }

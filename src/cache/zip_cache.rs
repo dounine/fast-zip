@@ -1,4 +1,3 @@
-use std::time::Instant;
 use crate::directory::Directory;
 use crate::eocd::EoCd;
 use crate::zip::{Cache, CompressionLevelWrapper, Parser, Zip};
@@ -6,6 +5,7 @@ use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 use indexmap::IndexMap;
+use std::time::Instant;
 
 impl Zip<Parser> {
     pub fn into_cache(self) -> Zip<Cache> {
@@ -50,7 +50,7 @@ impl Zip<Cache> {
     }
 }
 impl ValueRead for Zip<Cache> {
-    fn read_args<T: StreamSized>(stream: &mut Stream, args: &Option<T>) -> std::io::Result<Self> {
+    fn read(stream: &mut Stream) -> std::io::Result<Self> {
         let stream_size: u64 = stream.read_value()?;
         let data: Option<Stream> = if stream.read_value::<bool>()? {
             let len: u64 = stream.read_value()?;
@@ -85,11 +85,7 @@ impl ValueRead for Zip<Cache> {
     }
 }
 impl ValueWrite for Zip<Cache> {
-    fn write_args<T: StreamSized>(
-        self,
-        endian: &Endian,
-        args: &Option<T>,
-    ) -> std::io::Result<Stream> {
+    fn write(self, endian: &Endian) -> std::io::Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(self.stream_size)?;

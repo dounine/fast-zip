@@ -62,7 +62,7 @@ impl Extra {
     }
 }
 impl ValueWrite for Extra {
-    fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
+    fn write(self, endian: &Endian) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
         stream.write_value(self.header_id())?;
@@ -115,7 +115,7 @@ impl ValueWrite for Extra {
     }
 }
 impl ValueRead for Extra {
-    fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
+    fn read(stream: &mut Stream) -> Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
             0x5855 => {
