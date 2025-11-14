@@ -1,5 +1,5 @@
 use crate::directory::CompressionMethod;
-use crate::extra::{Extra, Normal};
+use crate::extra::{Extra};
 use crate::magic::Magic;
 use crate::zip::Parser;
 use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
@@ -63,7 +63,7 @@ pub struct ZipFile<TYPE> {
     pub file_name_length: u16,
     pub extra_field_length: u16,
     pub file_name: String,
-    pub extra_fields: Vec<Extra<Normal>>,
+    pub extra_fields: Vec<Extra>,
     pub data_descriptor: Option<DataDescriptor>,
     pub data_position: u64,
 }
@@ -147,7 +147,7 @@ impl ValueRead for ZipFile<Parser> {
         if file.extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra<Normal> = stream.read_value()?; //.read_exact_size(file.extra_field_length as u64)?;
+                let extra_field: Extra = stream.read_value()?; //.read_exact_size(file.extra_field_length as u64)?;
                 file.extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;

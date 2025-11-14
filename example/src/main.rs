@@ -1,9 +1,5 @@
-use fast_stream::deflate::CompressionLevel;
 use fast_stream::stream::Stream;
-use fast_zip::magic::Magic::File;
 use fast_zip::zip::Zip;
-use plist::Value;
-use plist::Value::String;
 use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
@@ -26,7 +22,7 @@ fn main() {
         .open("./data/hi4.ipa".to_string())
         .unwrap();
     file.write_all(&output.take_data().unwrap()).unwrap();
-    
+
     // let data = fs::read("./data/Info.plist").unwrap();
     // let data: Value = plist::from_bytes(&data).unwrap();
     // data.to_file_binary("./data/Info2.plist").unwrap();

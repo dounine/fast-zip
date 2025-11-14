@@ -1,11 +1,11 @@
 use crate::directory::{CompressionMethod, Directory};
-use crate::extra::{Center, Extra};
+use crate::extra::{Extra};
 use crate::zip::{Cache, Parser};
 use crate::zip_file::ZipFile;
 use fast_stream::bytes::{Bytes, StreamSized, ValueRead, ValueWrite};
 use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
-use std::io::{Read, Result};
+use std::io::{Result};
 
 impl Directory<Cache> {
     pub fn to_parser(self) -> Directory<Parser> {
@@ -126,7 +126,7 @@ impl ValueRead for Directory<Cache> {
         let external_file_attributes: u32 = stream.read_value()?;
         let offset_of_local_file_header: u32 = stream.read_value()?;
         let file_name: String = stream.read_value()?;
-        let extra_fields: Vec<Extra<Center>> = stream.read_value()?;
+        let extra_fields: Vec<Extra> = stream.read_value()?;
         let file_comment: Vec<u8> = stream.read_value()?;
         let file: ZipFile<Cache> = stream.read_value()?;
         Ok(Self {

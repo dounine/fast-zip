@@ -14,7 +14,6 @@ impl Zip<Parser> {
             directories.insert(k, v.into_cache());
         }
         Zip {
-            r#type: Cache,
             stream_size: self.stream_size,
             stream: self.stream,
             crc32_computer: self.crc32_computer,
@@ -40,7 +39,6 @@ impl Zip<Cache> {
             directories.insert(k, v.to_parser());
         }
         Zip {
-            r#type: Parser,
             stream_size: self.stream_size,
             stream: self.stream,
             crc32_computer: self.crc32_computer,
@@ -76,7 +74,6 @@ impl ValueRead for Zip<Cache> {
             directories.insert(k, v);
         }
         Ok(Self {
-            r#type: Cache,
             stream_size,
             stream: data,
             crc32_computer,

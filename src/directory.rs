@@ -1,7 +1,7 @@
-use crate::extra::{Center, Extra};
+use crate::extra::{Extra};
 use crate::magic::Magic;
 use crate::zip::Parser;
-use crate::zip_file::{DataDescriptor, ZipFile};
+use crate::zip_file::{ZipFile};
 use fast_stream::bytes::{Bytes, ValueRead, ValueWrite};
 use fast_stream::deflate::{CompressionLevel, Deflate};
 use fast_stream::derive::NumToEnum;
@@ -145,7 +145,7 @@ pub struct Directory<TYPE> {
     pub external_file_attributes: u32,
     pub offset_of_local_file_header: u32,
     pub file_name: String,
-    pub extra_fields: Vec<Extra<Center>>,
+    pub extra_fields: Vec<Extra>,
     pub file_comment: Vec<u8>,
     pub file: ZipFile<TYPE>,
 }
@@ -297,7 +297,7 @@ impl ValueRead for Directory<Parser> {
         let internal_file_attributes: u16 = stream.read_value()?;
         let external_file_attributes: u32 = stream.read_value()?;
         let offset_of_local_file_header: u32 = stream.read_value()?;
-        let mut extra_fields: Vec<Extra<Center>> = Vec::new();
+        let mut extra_fields: Vec<Extra> = Vec::new();
         let file_name = stream.read_exact_size(file_name_length as u64)?;
         let file_name =
             String::from_utf8(file_name).map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
@@ -306,7 +306,7 @@ impl ValueRead for Directory<Parser> {
         if extra_field_length > 0 {
             loop {
                 let position = stream.position()?;
-                let extra_field: Extra<Center> = stream.read_value_args(&Some(true))?;
+                let extra_field: Extra = stream.read_value_args(&Some(true))?;
                 extra_fields.push(extra_field);
                 let size = stream.position()? - position;
                 total_bytes += size;

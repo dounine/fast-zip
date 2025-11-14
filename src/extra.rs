@@ -3,33 +3,15 @@ use fast_stream::endian::Endian;
 use fast_stream::stream::Stream;
 use std::io::{Error, ErrorKind, Result};
 
-pub trait CenterValue {
-    fn value(&self) -> bool;
-}
-#[derive(Debug, Clone, Default)]
-pub struct Center;
-#[derive(Debug, Clone, Default)]
-pub struct Normal;
-impl CenterValue for Center {
-    fn value(&self) -> bool {
-        true
-    }
-}
-impl CenterValue for Normal {
-    fn value(&self) -> bool {
-        false
-    }
-}
 //https://libzip.org/specifications/extrafld.txt
 #[derive(Debug, Clone)]
-pub enum Extra<TYPE: CenterValue> {
+pub enum Extra {
     NTFS {
         mtime: u64,
         atime: u64,
         ctime: u64,
     },
     UnixExtendedTimestamp {
-        r#type: TYPE,
         mtime: Option<i32>,
         atime: Option<i32>,
         ctime: Option<i32>,
@@ -39,7 +21,7 @@ pub enum Extra<TYPE: CenterValue> {
         gid: u32,
     },
 }
-impl<TYPE: CenterValue> Extra<TYPE> {
+impl Extra {
     pub fn optional_field_size<T: Sized>(field: &Option<T>) -> u16 {
         match field {
             None => 0,
@@ -53,19 +35,14 @@ impl<TYPE: CenterValue> Extra<TYPE> {
         match self {
             Extra::NTFS { .. } => 32,
             Extra::UnixExtendedTimestamp {
-                r#type,
                 atime,
                 ctime,
                 mtime,
                 ..
             } => {
-                1 + Self::optional_field_size(mtime) +
-                    // if !r#type.value() {
-                    Self::optional_field_size(atime) + Self::optional_field_size(ctime)
-                    // } else {
-                    //     0
-                    // }
-
+                1 + Self::optional_field_size(mtime)
+                    + Self::optional_field_size(atime)
+                    + Self::optional_field_size(ctime)
             }
             Extra::UnixAttrs { .. } => 11,
         }
@@ -84,7 +61,7 @@ impl<TYPE: CenterValue> Extra<TYPE> {
         }
     }
 }
-impl<TYPE: CenterValue> ValueWrite for Extra<TYPE> {
+impl ValueWrite for Extra {
     fn write_args<T: Sized>(self, endian: &Endian, args: &Option<T>) -> Result<Stream> {
         let mut stream = Stream::empty();
         stream.with_endian(endian.clone());
@@ -106,7 +83,6 @@ impl<TYPE: CenterValue> ValueWrite for Extra<TYPE> {
                 stream.write_value(ctime)?;
             }
             Extra::UnixExtendedTimestamp {
-                r#type,
                 mtime,
                 atime,
                 ctime,
@@ -138,7 +114,7 @@ impl<TYPE: CenterValue> ValueWrite for Extra<TYPE> {
         Ok(stream)
     }
 }
-impl<TYPE: Default + CenterValue> ValueRead for Extra<TYPE> {
+impl ValueRead for Extra {
     fn read_args<T: Sized>(stream: &mut Stream, _args: &Option<T>) -> Result<Self> {
         let id: u16 = stream.read_value()?;
         Ok(match id {
@@ -163,7 +139,6 @@ impl<TYPE: Default + CenterValue> ValueRead for Extra<TYPE> {
                     None
                 };
                 Self::UnixExtendedTimestamp {
-                    r#type: TYPE::default(),
                     mtime,
                     atime,
                     ctime,
@@ -209,7 +184,6 @@ impl<TYPE: Default + CenterValue> ValueRead for Extra<TYPE> {
                     ));
                 }
                 Self::UnixExtendedTimestamp {
-                    r#type: TYPE::default(),
                     mtime,
                     atime,
                     ctime,
